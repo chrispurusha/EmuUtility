@@ -77,6 +77,7 @@
 
 // ── Protocol string size (from G2, kept for shared utils.c) ─────────────────
 #define CLAVIA_NAME_SIZE        (16)
+#define BLANK_SIZE              (0.0)
 
 // ── Graphics / layout constants (utilsGraphics shared layer) ─────────────────
 

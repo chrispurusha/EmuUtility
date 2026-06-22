@@ -12,10 +12,12 @@
 		EU88B1E7FCCE2E7A00DD4947 /* OpenGL.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EU2FC5D22D01F6190084A230 /* OpenGL.framework */; };
 		EU88B1E8FCCE2E9600DD4947 /* Quartz.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EU2FC5DD2D01F7840084A230 /* Quartz.framework */; };
 		EU88B1E9FCCE2E9D00DD4947 /* Security.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EU0BFBC02FCDE5440006DA88 /* Security.framework */; };
+		EUAA1001FCCE2EA000DD4947 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = EUAA1000FCCE2EA000DD4947 /* IOKit.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		EU0BFBC02FCDE5440006DA88 /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
+		EUAA1000FCCE2EA000DD4947 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
 		EU2FC5D22D01F6190084A230 /* OpenGL.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = OpenGL.framework; path = System/Library/Frameworks/OpenGL.framework; sourceTree = SDKROOT; };
 		EU2FC5D62D01F68C0084A230 /* CoreMIDI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMIDI.framework; path = System/Library/Frameworks/CoreMIDI.framework; sourceTree = SDKROOT; };
 		EU2FC5D82D01F6C20084A230 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
@@ -41,6 +43,7 @@
 				EU88B1B4FCCE2DD200DD4947 /* CoreMIDI.framework in Frameworks */,
 				EU88B1E7FCCE2E7A00DD4947 /* OpenGL.framework in Frameworks */,
 				EU88B1E8FCCE2E9600DD4947 /* Quartz.framework in Frameworks */,
+				EUAA1001FCCE2EA000DD4947 /* IOKit.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -68,6 +71,7 @@
 			isa = PBXGroup;
 			children = (
 				EU0BFBC02FCDE5440006DA88 /* Security.framework */,
+				EUAA1000FCCE2EA000DD4947 /* IOKit.framework */,
 				EU2FC5DD2D01F7840084A230 /* Quartz.framework */,
 				EU2FC5D82D01F6C20084A230 /* Cocoa.framework */,
 				EU2FC5D62D01F68C0084A230 /* CoreMIDI.framework */,
