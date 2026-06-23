@@ -218,6 +218,8 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
             LOG_DEBUG("peptalk LCD 0x50 unpacked=%u (full=%u)\n", (unsigned)unpacked, (unsigned)LCD_BYTES);
 
+            atomic_store(&gLcdPending, false);
+
             if (unpacked >= LCD_BYTES) {
                 // Full frame — replace pixels entirely
                 memcpy(gLcd.pixels, tmp, LCD_BYTES);
@@ -238,6 +240,8 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
         case PEPTALK_LCD_DELTA_RESP:
         {
             LOG_DEBUG("peptalk LCD 0x53 payloadLen=%u\n", (unsigned)payloadLen);
+
+            atomic_store(&gLcdPending, false);
 
             if (payloadLen < 10) {
                 break;

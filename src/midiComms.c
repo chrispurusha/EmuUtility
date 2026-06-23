@@ -303,14 +303,19 @@ static void * midi_thread(void * arg) {
                 extern void peptalk_send_led_state_request(void);
                 peptalk_send_led_state_request();
                 atomic_store(&gNeedLeds, false);
-            } else if (atomic_load(&gNeedLcdFull)) {
-                extern void peptalk_send_lcd_dump_request(void);
-                peptalk_send_lcd_dump_request();
-                atomic_store(&gNeedLcdFull, false);  // send once; response clears the state
-            } else if (atomic_load(&gNeedLcdDelta)) {
-                extern void peptalk_send_lcd_delta_request(void);
-                peptalk_send_lcd_delta_request();
-                atomic_store(&gNeedLcdDelta, false);
+            } else if (!atomic_load(&gLcdPending)) {
+                // Only send one LCD request at a time; wait for response before next
+                if (atomic_load(&gNeedLcdFull)) {
+                    extern void peptalk_send_lcd_dump_request(void);
+                    peptalk_send_lcd_dump_request();
+                    atomic_store(&gNeedLcdFull, false);
+                    atomic_store(&gLcdPending, true);
+                } else if (atomic_load(&gNeedLcdDelta)) {
+                    extern void peptalk_send_lcd_delta_request(void);
+                    peptalk_send_lcd_delta_request();
+                    atomic_store(&gNeedLcdDelta, false);
+                    atomic_store(&gLcdPending, true);
+                }
             }
         }
         struct timespec ts = {0, 33000000};   // ~30 Hz poll

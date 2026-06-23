@@ -44,14 +44,18 @@ static tCoord window_to_logical(void * win, double x, double y) {
     return coord;
 }
 
+static bool   gDialDrag  = false;
+static double gDialDragY = 0.0;
+static double gDialAccum = 0.0;
+
 void handle_mouse_button(void * win, int button, int action, int mods, double x, double y) {
     (void)mods;
 
     if (button != 0) {   // left button only
         return;
     }
-    tCoord    coord   = window_to_logical(win, x, y);
-    bool      pressed = (action == 1);   // GLFW_PRESS == 1
+    tCoord coord   = window_to_logical(win, x, y);
+    bool   pressed = (action == 1);      // GLFW_PRESS == 1
 
     LOG_DEBUG("mouse %s win(%.0f,%.0f) logical(%.0f,%.0f)\n",
               pressed ? "press" : "release", x, y, coord.x, coord.y);
@@ -63,7 +67,23 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     if (handle_context_menu_click(coord)) {
         return;
     }
-    tButton * btn     = button_at(coord);
+
+    if (pressed && dial_hit_test(coord)) {
+        gDialDrag  = true;
+        gDialDragY = y;
+        gDialAccum = 0.0;
+        return;
+    }
+
+    if (!pressed && gDialDrag) {
+        gDialDrag = false;
+        // Request a full LCD dump once dragging stops so delta-base state
+        // is clean after the burst of rotary events
+        atomic_store(&gNeedLcdFull, true);
+        atomic_store(&gReDraw, true);
+        return;
+    }
+    tButton * btn = button_at(coord);
 
     if (btn != NULL) {
         LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
@@ -79,7 +99,20 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
 void handle_cursor_pos(void * win, double x, double y) {
     (void)win;
     (void)x;
-    (void)y;
+
+    if (!gDialDrag) {
+        return;
+    }
+    // Drag up = positive delta (increment), 2 window pixels per step
+    gDialAccum += (gDialDragY - y) * 0.5;
+    gDialDragY  = y;
+
+    int steps = (int)gDialAccum;
+
+    if (steps != 0) {
+        gDialAccum -= steps;
+        dial_nudge(steps);
+    }
 }
 
 void handle_key(void * win, int key, int scancode, int action, int mods) {

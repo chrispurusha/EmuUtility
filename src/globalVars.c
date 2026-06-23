@@ -40,6 +40,7 @@ _Atomic uint8_t  gSessionSeqId   = 0;
 tLcdBuffer       gLcd            = {0};
 _Atomic bool     gNeedLcdFull    = true;
 _Atomic bool     gNeedLcdDelta   = false;
+_Atomic bool     gLcdPending     = false;
 
 _Atomic uint32_t gLeds           = 0;
 _Atomic bool     gNeedLeds       = true;

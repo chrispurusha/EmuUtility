@@ -47,6 +47,7 @@ extern _Atomic uint8_t  gSessionSeqId;
 extern tLcdBuffer       gLcd;
 extern _Atomic bool     gNeedLcdFull;     // request full LCD dump next poll
 extern _Atomic bool     gNeedLcdDelta;    // request delta LCD dump next poll
+extern _Atomic bool     gLcdPending;      // an LCD request is in-flight; don't send another
 
 // ── LEDs ─────────────────────────────────────────────────────────────────────
 extern _Atomic uint32_t gLeds;            // bitmask of lit LEDs

@@ -32,9 +32,19 @@ extern "C" {
 #include "globalVars.h"
 #include "utilsGraphics.h"
 #include "emuGraphics.h"
+#include "peptalk.h"
 
 static GLuint   gLcdTexture  = 0;
 static uint32_t gLastRefresh = 0xFFFFFFFF;
+
+// ── Dial (large knob, right of LCD) ──────────────────────────────────────────
+
+#define DIAL_CX        2200.0
+#define DIAL_CY        148.0  // vertically centred on the LCD
+#define DIAL_RADIUS    120.0
+#define DIAL_RANGE     128
+
+static uint32_t gDialValue   = 0;
 
 // ── LCD texture ───────────────────────────────────────────────────────────────
 
@@ -113,6 +123,44 @@ void render_lcd(tRectangle area) {
 
     glBindTexture(GL_TEXTURE_2D, 0);
     glDisable(GL_TEXTURE_2D);
+}
+
+void render_dial_knob(void) {
+    tCoord centre = {DIAL_CX, DIAL_CY};
+
+    // Full-circle disc
+    set_rgb_colour((tRgb){0.30, 0.30, 0.30});
+    render_circle_part_angle(mainArea, centre, DIAL_RADIUS, 0.0, 360.0, 36);
+
+    // Outer ring
+    set_rgb_colour((tRgb){0.55, 0.55, 0.55});
+    render_circle_line(mainArea, centre, DIAL_RADIUS, 36, 4.0);
+
+    // Indicator line — full 360° rotation, starting from 12 o'clock
+    double angle  = 270.0 + ((double)gDialValue / (double)DIAL_RANGE) * 360.0;
+
+    set_rgb_colour((tRgb){0.90, 0.90, 0.90});
+    render_radial_line(mainArea, centre, DIAL_RADIUS * 0.75, angle, 5.0);
+}
+
+bool dial_hit_test(tCoord coord) {
+    double dx = coord.x - DIAL_CX;
+    double dy = coord.y - DIAL_CY;
+
+    return (dx * dx + dy * dy) <= (DIAL_RADIUS * DIAL_RADIUS);
+}
+
+void dial_nudge(int delta) {
+    int next = ((int)gDialValue + delta % (int)DIAL_RANGE + (int)DIAL_RANGE * 64) % (int)DIAL_RANGE;
+
+    gDialValue = (uint32_t)next;
+
+    if (atomic_load(&gSessionOpen)) {
+        peptalk_send_rotary_event(delta);
+        // No LCD request here — caller triggers a full dump on drag end
+        // to avoid delta-base misalignment from rapid successive events
+    }
+    atomic_store(&gReDraw, true);
 }
 
 // ── Button layout ─────────────────────────────────────────────────────────────
