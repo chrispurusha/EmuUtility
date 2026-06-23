@@ -251,7 +251,6 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
             if (unpacked > 0) {
                 peptalk_apply_lcd_delta(tmp, unpacked);
                 gLcd.refresh++;
-                atomic_store(&gNeedLcdDelta, false);
                 atomic_store(&gReDraw, true);
             }
             break;
