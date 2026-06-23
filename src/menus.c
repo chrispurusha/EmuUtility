@@ -40,10 +40,10 @@ bool close_context_menu_if_outside(tCoord coord) {
     if (!gContextMenu.active) {
         return false;
     }
-    uint32_t   rows    = (gContextMenu.count + gContextMenu.columns - 1) / gContextMenu.columns;
-    double     menuW   = gContextMenu.cellWidth * gContextMenu.columns;
-    double     cellH   = 20.0;
-    double     menuH   = cellH * rows;
+    uint32_t   rows     = (gContextMenu.count + gContextMenu.columns - 1) / gContextMenu.columns;
+    double     menuW    = gContextMenu.cellWidth * gContextMenu.columns;
+    double     cellH    = 20.0;
+    double     menuH    = cellH * rows;
     tRectangle menuRect = {gContextMenu.coord, {menuW, menuH}};
 
     if (!within_rectangle(coord, menuRect)) {
@@ -64,8 +64,10 @@ bool handle_context_menu_click(tCoord coord) {
         uint32_t   col      = i % gContextMenu.columns;
         uint32_t   row      = i / gContextMenu.columns;
         tRectangle itemRect = {
-            {gContextMenu.coord.x + col * gContextMenu.cellWidth,
-             gContextMenu.coord.y + row * cellH},
+            {
+                gContextMenu.coord.x + col * gContextMenu.cellWidth,
+                gContextMenu.coord.y + row * cellH
+            },
             {gContextMenu.cellWidth, cellH}
         };
 
@@ -78,6 +80,7 @@ bool handle_context_menu_click(tCoord coord) {
             return true;
         }
     }
+
     return false;
 }
 
@@ -91,13 +94,15 @@ void render_context_menu(void) {
         uint32_t   col      = i % gContextMenu.columns;
         uint32_t   row      = i / gContextMenu.columns;
         tRectangle itemRect = {
-            {gContextMenu.coord.x + col * gContextMenu.cellWidth,
-             gContextMenu.coord.y + row * cellH},
+            {
+                gContextMenu.coord.x + col * gContextMenu.cellWidth,
+                gContextMenu.coord.y + row * cellH
+            },
             {gContextMenu.cellWidth, cellH}
         };
         tRectangle textRect = {
             {itemRect.coord.x + 4.0, itemRect.coord.y + 5.0},
-            {0.0, 9.0}
+            {                   0.0,                    9.0}
         };
 
         set_rgb_colour(gContextMenu.items[i].colour);

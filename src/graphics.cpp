@@ -23,7 +23,7 @@ extern "C" {
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
-#define GL_SILENCE_DEPRECATION 1
+#define GL_SILENCE_DEPRECATION    1
 #include <GLFW/glfw3.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -87,8 +87,8 @@ void wake_glfw(void) {
 // ── Setup co-ordinate system ──────────────────────────────────────────────────
 
 static void setup_projection(GLFWwindow * win) {
-    int fbW = 0;
-    int fbH = 0;
+    int fbW  = 0;
+    int fbH  = 0;
 
     glfwGetFramebufferSize(win, &fbW, &fbH);
 
@@ -109,12 +109,10 @@ static void setup_projection(GLFWwindow * win) {
 // ── Font (FreeType via system path) ──────────────────────────────────────────
 
 static int init_font(void) {
-    static const char * fontPaths[] = {
-        "/System/Library/Fonts/Supplemental/Arial.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-        "/System/Library/Fonts/SFNSMono.ttf",
-        NULL
-    };
+    static const char * fontPaths[] = {"/System/Library/Fonts/Supplemental/Arial.ttf",
+                                       "/System/Library/Fonts/Helvetica.ttc",
+                                       "/System/Library/Fonts/SFNSMono.ttf",
+                                       NULL};
 
     for (int i = 0; fontPaths[i] != NULL; i++) {
         if (preload_glyph_textures(fontPaths[i], 72.0)) {
@@ -134,7 +132,6 @@ void init_graphics(void) {
         LOG_ERROR("glfwInit failed\n");
         exit(EXIT_FAILURE);
     }
-
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 1);
     glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
@@ -146,7 +143,6 @@ void init_graphics(void) {
         glfwTerminate();
         exit(EXIT_FAILURE);
     }
-
     gWindow = win;
 
     glfwMakeContextCurrent(win);
@@ -173,8 +169,8 @@ void init_graphics(void) {
 // ── Render frame ──────────────────────────────────────────────────────────────
 
 static void render_frame(GLFWwindow * win) {
-    int fbW = 0;
-    int fbH = 0;
+    int        fbW      = 0;
+    int        fbH      = 0;
 
     glfwGetFramebufferSize(win, &fbW, &fbH);
     setup_projection(win);
@@ -182,14 +178,14 @@ static void render_frame(GLFWwindow * win) {
     glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    double logW = TARGET_FRAME_BUFF_WIDTH;
-    double logH = TARGET_FRAME_BUFF_HEIGHT;
+    double     logW     = TARGET_FRAME_BUFF_WIDTH;
+    double     logH     = TARGET_FRAME_BUFF_HEIGHT;
 
     // LCD area: centred, 4× the raw 240×64 pixel size
-    double lcdDispW = LCD_WIDTH  * 4.0;
-    double lcdDispH = LCD_HEIGHT * 4.0;
-    double lcdX     = (logW - lcdDispW) / 2.0;
-    double lcdY     = 20.0;
+    double     lcdDispW = LCD_WIDTH * 4.0;
+    double     lcdDispH = LCD_HEIGHT * 4.0;
+    double     lcdX     = (logW - lcdDispW) / 2.0;
+    double     lcdY     = 20.0;
 
     tRectangle mainArea = {{0.0, 0.0}, {logW, logH}};
     tRectangle lcdArea  = {{lcdX, lcdY}, {lcdDispW, lcdDispH}};
@@ -213,7 +209,6 @@ void do_graphics_loop(void) {
         if (reDraw) {
             render_frame(win);
         }
-
         glfwWaitEvents();
     }
 }

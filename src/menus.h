@@ -27,20 +27,20 @@ extern "C" {
 #endif
 
 typedef struct tMenuItem {
-    const char        * label;
-    tRgb                colour;
-    void             (* action)(int index);
-    int                 index;
-    struct tMenuItem  * subItems;
+    const char *       label;
+    tRgb               colour;
+    void (*action)(int index);
+    int                index;
+    struct tMenuItem * subItems;
 } tMenuItem;
 
 typedef struct {
-    bool       active;
-    tCoord     coord;
-    tMenuItem *items;
-    uint32_t   count;
-    uint32_t   columns;
-    double     cellWidth;
+    bool        active;
+    tCoord      coord;
+    tMenuItem * items;
+    uint32_t    count;
+    uint32_t    columns;
+    double      cellWidth;
 } tContextMenu;
 
 extern tContextMenu gContextMenu;

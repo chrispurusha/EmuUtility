@@ -37,8 +37,8 @@ static void signal_handler(int sigraised) {
 }
 
 static void init_signals(void) {
-    signal(SIGINT,  signal_handler);
-    signal(SIGBUS,  signal_handler);
+    signal(SIGINT, signal_handler);
+    signal(SIGBUS, signal_handler);
     signal(SIGSEGV, signal_handler);
     signal(SIGTERM, signal_handler);
     signal(SIGABRT, signal_handler);

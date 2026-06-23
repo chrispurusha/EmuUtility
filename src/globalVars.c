@@ -21,25 +21,25 @@
 #include "types.h"
 #include "globalVars.h"
 
-_Atomic bool     gQuitAll       = false;
-_Atomic bool     gReDraw        = true;
+_Atomic bool     gQuitAll        = false;
+_Atomic bool     gReDraw         = true;
 
-void           * gWindow        = NULL;
+void *           gWindow         = NULL;
 double           gGlobalGuiScale = 1.0;
 
-tEmuDevice       gDevice        = {0};
-MIDIClientRef    gMidiClient    = 0;
-MIDIPortRef      gMidiInPort    = 0;
-MIDIPortRef      gMidiOutPort   = 0;
-MIDIEndpointRef  gMidiSource    = 0;
-MIDIEndpointRef  gMidiDest      = 0;
+tEmuDevice       gDevice         = {0};
+MIDIClientRef    gMidiClient     = 0;
+MIDIPortRef      gMidiInPort     = 0;
+MIDIPortRef      gMidiOutPort    = 0;
+MIDIEndpointRef  gMidiSource     = 0;
+MIDIEndpointRef  gMidiDest       = 0;
 
-_Atomic bool     gSessionOpen   = false;
-_Atomic uint8_t  gSessionSeqId  = 0;
+_Atomic bool     gSessionOpen    = false;
+_Atomic uint8_t  gSessionSeqId   = 0;
 
-tLcdBuffer       gLcd           = {0};
-_Atomic bool     gNeedLcdFull   = true;
-_Atomic bool     gNeedLcdDelta  = false;
+tLcdBuffer       gLcd            = {0};
+_Atomic bool     gNeedLcdFull    = true;
+_Atomic bool     gNeedLcdDelta   = false;
 
-_Atomic uint32_t gLeds          = 0;
-_Atomic bool     gNeedLeds      = true;
+_Atomic uint32_t gLeds           = 0;
+_Atomic bool     gNeedLeds       = true;

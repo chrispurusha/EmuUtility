@@ -1165,8 +1165,8 @@ void set_zoom_factor(double newZoom, tCoord mouseCoord) {
         newScrollY = maxScrollY;
     }
     // Convert back to percent
-    gXScrollPercent   = (maxScrollX > 0.0) ? (newScrollX / maxScrollX) * 100.0 : 0.0;
-    gYScrollPercent   = (maxScrollY > 0.0) ? (newScrollY / maxScrollY) * 100.0 : 0.0;
+    gXScrollPercent = (maxScrollX > 0.0) ? (newScrollX / maxScrollX) * 100.0 : 0.0;
+    gYScrollPercent = (maxScrollY > 0.0) ? (newScrollY / maxScrollY) * 100.0 : 0.0;
 
     // Sync scrollbar thumb positions to match new percent
     double renderWidth  = get_render_width() / gGlobalGuiScale;

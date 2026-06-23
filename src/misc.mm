@@ -37,8 +37,8 @@
 @end
 
 void setup_main_menu(void) {
-    NSMenu *                menuBar = [[NSApplication sharedApplication] mainMenu];
-    static EmuMenuTarget *  target  = nil;
+    NSMenu *               menuBar  = [[NSApplication sharedApplication] mainMenu];
+    static EmuMenuTarget * target   = nil;
 
     if (target == nil) {
         target = [[EmuMenuTarget alloc] init];
@@ -48,12 +48,11 @@ void setup_main_menu(void) {
         menuBar = [[NSMenu alloc] init];
         [[NSApplication sharedApplication] setMainMenu:menuBar];
     }
-
-    NSMenuItem * devMI   = [[NSMenuItem alloc] init];
-    NSMenu *     devMenu = [[NSMenu alloc] initWithTitle:@"Device"];
-    NSMenuItem * scanItem = [[NSMenuItem alloc] initWithTitle:@"Scan Devices"
-                                                       action:@selector(scanDevices:)
-                                                keyEquivalent:@"r"];
+    NSMenuItem *           devMI    = [[NSMenuItem alloc] init];
+    NSMenu *               devMenu  = [[NSMenu alloc] initWithTitle:@"Device"];
+    NSMenuItem *           scanItem = [[NSMenuItem alloc] initWithTitle:@"Scan Devices"
+                                       action:@selector(scanDevices:)
+                                       keyEquivalent:@"r"];
     [scanItem setTarget:target];
     [devMenu addItem:scanItem];
     [devMI setSubmenu:devMenu];
@@ -63,9 +62,9 @@ void setup_main_menu(void) {
 void register_sleep_wake_notifications(void) {
     [[[NSWorkspace sharedWorkspace] notificationCenter]
      addObserverForName:NSWorkspaceDidWakeNotification
-                 object:nil
-                  queue:nil
-             usingBlock:^(NSNotification * note) {
-                 midi_scan_devices();
-             }];
+     object:nil
+     queue:nil
+     usingBlock:^(NSNotification * note) {
+         midi_scan_devices();
+     }];
 }

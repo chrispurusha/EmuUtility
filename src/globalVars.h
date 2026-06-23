@@ -28,7 +28,7 @@ extern _Atomic bool     gQuitAll;
 extern _Atomic bool     gReDraw;
 
 // ── GLFW window ──────────────────────────────────────────────────────────────
-extern void           * gWindow;           // GLFWwindow*; void* avoids pulling GLFW into C headers
+extern void *           gWindow;           // GLFWwindow*; void* avoids pulling GLFW into C headers
 extern double           gGlobalGuiScale;
 
 // ── MIDI / device ────────────────────────────────────────────────────────────

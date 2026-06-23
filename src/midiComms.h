@@ -27,20 +27,20 @@ extern "C" {
 #endif
 
 // Called once from main() to start the MIDI thread and open CoreMIDI ports.
-int  start_midi_thread(void);
+int start_midi_thread(void);
 
 // Send raw SysEx (or any MIDI bytes) to the currently selected output.
 void midi_send(const uint8_t * data, uint32_t length);
 
 // Scan for E-mu devices and populate gDevice / gMidiSource / gMidiDest.
 // Returns EXIT_SUCCESS if at least one device is found.
-int  midi_scan_devices(void);
+int midi_scan_devices(void);
 
 // Send MIDI Identity Request to all outputs to discover connected devices.
 void midi_send_identity_request(void);
 
 // Called from the graphics layer to wake the GLFW event loop.
-void register_midi_wake_cb(void (* cb)(void));
+void register_midi_wake_cb(void ( *cb )(void));
 
 #ifdef __cplusplus
 }

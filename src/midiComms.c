@@ -24,9 +24,94 @@
 #include "peptalk.h"
 #include "midiComms.h"
 
-static void (* gWakeCb)(void) = NULL;
-static pthread_t gMidiThread  = 0;
-static pthread_mutex_t gSendMutex = PTHREAD_MUTEX_INITIALIZER;
+static void            (*gWakeCb)(void) = NULL;
+static pthread_t       gMidiThread = 0;
+static pthread_mutex_t gSendMutex  = PTHREAD_MUTEX_INITIALIZER;
+
+// SysEx reassembly — CoreMIDI fragments large messages across multiple packets
+#define SYSEX_BUF_SIZE    8192
+static uint8_t         gSysExBuf[SYSEX_BUF_SIZE];
+static uint32_t        gSysExLen   = 0;
+static MIDIEndpointRef gSysExSrc   = 0;
+
+// ── Internal send to a specific destination ───────────────────────────────────
+
+static void midi_send_to(const uint8_t * data, uint32_t length, MIDIEndpointRef dest) {
+    if ((gMidiOutPort == 0) || (dest == 0) || (data == NULL) || (length == 0)) {
+        return;
+    }
+    uint8_t          buf[512 + sizeof(MIDIPacketList)];
+    MIDIPacketList * pktList = (MIDIPacketList *)buf;
+    MIDIPacket *     pkt     = MIDIPacketListInit(pktList);
+
+    pkt = MIDIPacketListAdd(pktList, sizeof(buf), pkt, 0, length, data);
+
+    if (pkt == NULL) {
+        LOG_ERROR("MIDIPacketListAdd failed (message too long?)\n");
+        return;
+    }
+    pthread_mutex_lock(&gSendMutex);
+    OSStatus         err     = MIDISend(gMidiOutPort, dest, pktList);
+    pthread_mutex_unlock(&gSendMutex);
+
+    if (err != noErr) {
+        LOG_ERROR("MIDISend error %d\n", (int)err);
+    }
+}
+
+// ── Identity reply handler ────────────────────────────────────────────────────
+
+static void handle_identity_reply(MIDIEndpointRef src, const uint8_t * data, uint32_t length) {
+    // F0 7E <device_id> 06 02 <mfr_id> <fam_lsb> <fam_msb> <mem_lsb> <mem_msb> ... F7
+    LOG_DEBUG("identity reply length=%u mfr=0x%02X\n", (unsigned)length, (length >= 6) ? data[5] : 0xFF);
+
+    if (length < 10) {
+        LOG_DEBUG("identity reply too short\n");
+        return;
+    }
+
+    if (data[5] != EMU_MANUFACTURER_ID) {
+        LOG_DEBUG("identity reply mfr 0x%02X != E-mu 0x%02X, ignoring\n", data[5], EMU_MANUFACTURER_ID);
+        return;
+    }
+    uint8_t         deviceId = data[2];
+    uint16_t        family   = (uint16_t)(data[6] | ((uint16_t)data[7] << 7));
+    uint16_t        member   = (uint16_t)(data[8] | ((uint16_t)data[9] << 7));
+
+    LOG_DEBUG("E-mu identity reply: device_id=0x%02X family=%u member=%u\n",
+              deviceId, (unsigned)family, (unsigned)member);
+
+    // Find the destination endpoint in the same entity as the replying source
+    MIDIEntityRef   entity   = 0;
+    MIDIEndpointRef dest     = 0;
+
+    if (MIDIEndpointGetEntity(src, &entity) == noErr && entity != 0) {
+        ItemCount dests = MIDIEntityGetNumberOfDestinations(entity);
+
+        if (dests > 0) {
+            dest = MIDIEntityGetDestination(entity, 0);
+        }
+    }
+
+    if (dest == 0) {
+        LOG_ERROR("No destination found for E-mu identity reply source\n");
+        return;
+    }
+    gDevice.id        = deviceId;
+    gDevice.family    = family;
+    gDevice.member    = member;
+    gDevice.connected = true;
+    gMidiSource       = src;
+    gMidiDest         = dest;
+
+    LOG_DEBUG("Locked onto E-mu device\n");
+
+    peptalk_send_session_open();
+
+    if (gWakeCb != NULL) {
+        gWakeCb();
+    }
+}
 
 // ── MIDI notification callback ────────────────────────────────────────────────
 
@@ -44,22 +129,81 @@ static void midi_notify_cb(const MIDINotification * msg, void * refCon) {
     }
 }
 
+// ── SysEx dispatch (called once a complete message has been reassembled) ─────
+
+static void dispatch_sysex(MIDIEndpointRef src, const uint8_t * data, uint32_t length) {
+    LOG_DEBUG("SysEx complete %u bytes from src 0x%08X hdr: %02X %02X %02X %02X %02X %02X\n",
+              (unsigned)length, (unsigned)src,
+              (length > 0) ? data[0] : 0xFF,
+              (length > 1) ? data[1] : 0xFF,
+              (length > 2) ? data[2] : 0xFF,
+              (length > 3) ? data[3] : 0xFF,
+              (length > 4) ? data[4] : 0xFF,
+              (length > 5) ? data[5] : 0xFF);
+
+    if (  (length >= 5)
+       && (data[1] == MIDI_NON_REALTIME)
+       && (data[3] == MIDI_IDENTITY_REQUEST_SUB1)
+       && (data[4] == MIDI_IDENTITY_REPLY_SUB2)) {
+        handle_identity_reply(src, data, length);
+    } else {
+        peptalk_handle_message(data, length);
+    }
+
+    if (gWakeCb != NULL) {
+        gWakeCb();
+    }
+}
+
 // ── MIDI read callback (called on MIDI thread) ────────────────────────────────
+// CoreMIDI fragments large SysEx across multiple MIDIPackets; we reassemble
+// byte-by-byte before dispatching.
 
 static void midi_read_cb(const MIDIPacketList * pktList, void * readProcRefCon, void * srcConnRefCon) {
     (void)readProcRefCon;
-    (void)srcConnRefCon;
 
+    MIDIEndpointRef    src = (MIDIEndpointRef)(uintptr_t)srcConnRefCon;
     const MIDIPacket * pkt = &pktList->packet[0];
 
     for (uint32_t i = 0; i < pktList->numPackets; i++) {
-        if ((pkt->length > 0) && (pkt->data[0] == MIDI_SYSEX_START)) {
-            peptalk_handle_message(pkt->data, pkt->length);
+        for (uint16_t b = 0; b < pkt->length; b++) {
+            uint8_t byte = pkt->data[b];
 
-            if (gWakeCb != NULL) {
-                gWakeCb();
+            if (byte == MIDI_SYSEX_START) {
+                gSysExBuf[0] = byte;
+                gSysExLen    = 1;
+                gSysExSrc    = src;
+            } else if (byte == MIDI_SYSEX_END) {
+                if (gSysExLen > 0) {
+                    if (gSysExLen < SYSEX_BUF_SIZE) {
+                        gSysExBuf[gSysExLen++] = byte;
+                    }
+                    dispatch_sysex(gSysExSrc, gSysExBuf, gSysExLen);
+                    gSysExLen = 0;
+                }
+            } else if (byte >= 0xF8) {
+                // Realtime byte — valid inside SysEx, ignore for our purposes
+            } else if (byte >= 0x80) {
+                // Any other status byte aborts the in-progress SysEx
+                if (gSysExLen > 0) {
+                    LOG_DEBUG("SysEx aborted by status 0x%02X after %u bytes\n",
+                              byte, (unsigned)gSysExLen);
+                    gSysExLen = 0;
+                }
+            } else {
+                // Data byte
+                if (gSysExLen > 0) {
+                    if (gSysExLen < SYSEX_BUF_SIZE) {
+                        gSysExBuf[gSysExLen++] = byte;
+                    } else {
+                        LOG_ERROR("SysEx buffer overflow after %u bytes, discarding\n",
+                                  (unsigned)gSysExLen);
+                        gSysExLen = 0;
+                    }
+                }
             }
         }
+
         pkt = MIDIPacketNext(pkt);
     }
 }
@@ -67,8 +211,17 @@ static void midi_read_cb(const MIDIPacketList * pktList, void * readProcRefCon, 
 // ── Device scanning ───────────────────────────────────────────────────────────
 
 int midi_scan_devices(void) {
-    ItemCount srcCount  = MIDIGetNumberOfSources();
-    ItemCount destCount = MIDIGetNumberOfDestinations();
+    static const uint8_t idReq[]   = {
+        MIDI_SYSEX_START,
+        MIDI_NON_REALTIME,
+        MIDI_DEVICE_INQUIRY,
+        MIDI_IDENTITY_REQUEST_SUB1,
+        MIDI_IDENTITY_REQUEST_SUB2,
+        MIDI_SYSEX_END
+    };
+
+    ItemCount            srcCount  = MIDIGetNumberOfSources();
+    ItemCount            destCount = MIDIGetNumberOfDestinations();
 
     gMidiSource = 0;
     gMidiDest   = 0;
@@ -86,10 +239,8 @@ int midi_scan_devices(void) {
             CFRelease(name);
             LOG_DEBUG("MIDI source %lu: %s\n", (unsigned long)i, buf);
         }
-        // Accept any source for now; will filter on identity response
-        if (gMidiSource == 0) {
-            gMidiSource = src;
-        }
+        // Pass src as connRefCon so midi_read_cb knows which endpoint replied
+        MIDIPortConnectSource(gMidiInPort, src, (void *)(uintptr_t)src);
     }
 
     for (ItemCount i = 0; i < destCount; i++) {
@@ -104,26 +255,17 @@ int midi_scan_devices(void) {
             CFRelease(name);
             LOG_DEBUG("MIDI dest %lu: %s\n", (unsigned long)i, buf);
         }
-
-        if (gMidiDest == 0) {
-            gMidiDest = dest;
-        }
+        midi_send_to(idReq, sizeof(idReq), dest);
     }
 
-    if ((gMidiSource != 0) && (gMidiDest != 0)) {
-        // Connect source to our input port
-        MIDIPortConnectSource(gMidiInPort, gMidiSource, NULL);
-        LOG_DEBUG("Connected MIDI source to input port\n");
-
-        midi_send_identity_request();
+    if ((srcCount > 0) && (destCount > 0)) {
         return EXIT_SUCCESS;
     }
-
     LOG_DEBUG("No MIDI sources/destinations found\n");
     return EXIT_FAILURE;
 }
 
-// ── Identity request ──────────────────────────────────────────────────────────
+// ── Identity request (public — re-sends to confirmed destination) ─────────────
 
 void midi_send_identity_request(void) {
     static const uint8_t idReq[] = {
@@ -136,34 +278,13 @@ void midi_send_identity_request(void) {
     };
 
     LOG_DEBUG("Sending MIDI identity request\n");
-    midi_send(idReq, sizeof(idReq));
+    midi_send_to(idReq, sizeof(idReq), gMidiDest);
 }
 
 // ── Send ──────────────────────────────────────────────────────────────────────
 
 void midi_send(const uint8_t * data, uint32_t length) {
-    if ((gMidiOutPort == 0) || (gMidiDest == 0) || (data == NULL) || (length == 0)) {
-        return;
-    }
-
-    uint8_t             buf[512 + sizeof(MIDIPacketList)];
-    MIDIPacketList    * pktList = (MIDIPacketList *)buf;
-    MIDIPacket        * pkt     = MIDIPacketListInit(pktList);
-
-    pkt = MIDIPacketListAdd(pktList, sizeof(buf), pkt, 0, length, data);
-
-    if (pkt == NULL) {
-        LOG_ERROR("MIDIPacketListAdd failed (message too long?)\n");
-        return;
-    }
-
-    pthread_mutex_lock(&gSendMutex);
-    OSStatus err = MIDISend(gMidiOutPort, gMidiDest, pktList);
-    pthread_mutex_unlock(&gSendMutex);
-
-    if (err != noErr) {
-        LOG_ERROR("MIDISend error %d\n", (int)err);
-    }
+    midi_send_to(data, length, gMidiDest);
 }
 
 // ── MIDI poll thread ──────────────────────────────────────────────────────────
@@ -190,11 +311,9 @@ static void * midi_thread(void * arg) {
                 atomic_store(&gNeedLcdDelta, false);
             }
         }
-
         struct timespec ts = {0, 33000000};   // ~30 Hz poll
         nanosleep(&ts, NULL);
     }
-
     LOG_DEBUG("MIDI thread exiting\n");
     return NULL;
 }
@@ -211,16 +330,14 @@ int start_midi_thread(void) {
         LOG_ERROR("MIDIClientCreate failed: %d\n", (int)err);
         return EXIT_FAILURE;
     }
-
-    CFStringRef inName = CFSTR("EmuUtility In");
+    CFStringRef inName     = CFSTR("EmuUtility In");
     err = MIDIInputPortCreate(gMidiClient, inName, midi_read_cb, NULL, &gMidiInPort);
 
     if (err != noErr) {
         LOG_ERROR("MIDIInputPortCreate failed: %d\n", (int)err);
         return EXIT_FAILURE;
     }
-
-    CFStringRef outName = CFSTR("EmuUtility Out");
+    CFStringRef outName    = CFSTR("EmuUtility Out");
     err = MIDIOutputPortCreate(gMidiClient, outName, &gMidiOutPort);
 
     if (err != noErr) {
@@ -232,10 +349,9 @@ int start_midi_thread(void) {
         LOG_ERROR("pthread_create for MIDI thread failed\n");
         return EXIT_FAILURE;
     }
-
     return EXIT_SUCCESS;
 }
 
-void register_midi_wake_cb(void (* cb)(void)) {
+void register_midi_wake_cb(void ( *cb )(void)) {
     gWakeCb = cb;
 }
