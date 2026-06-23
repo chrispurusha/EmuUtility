@@ -37,14 +37,9 @@ static tCoord window_to_logical(void * win, double x, double y) {
     extern void glfwGetWindowSize(void *, int *, int *);
     glfwGetWindowSize(win, &winW, &winH);
 
-    // utilsGraphics render functions apply global_scale (gGlobalGuiScale) to all
-    // mainArea coordinates before passing to OpenGL, so hit-test coordinates must
-    // use the same pre-scale space as btn->rectangle.  Dividing by gGlobalGuiScale
-    // here cancels that factor out.
-    double scale = (gGlobalGuiScale > 0.0) ? gGlobalGuiScale : 1.0;
     tCoord coord = {
-        .x = (winW > 0) ? (x / winW) * TARGET_FRAME_BUFF_WIDTH / scale : x,
-        .y = (winH > 0) ? (y / winH) * TARGET_FRAME_BUFF_HEIGHT / scale : y,
+        .x = (winW > 0) ? (x / winW) * TARGET_FRAME_BUFF_WIDTH : x,
+        .y = (winH > 0) ? (y / winH) * TARGET_FRAME_BUFF_HEIGHT : y,
     };
     return coord;
 }

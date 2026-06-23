@@ -117,9 +117,9 @@ void render_lcd(tRectangle area) {
 // ── Button layout ─────────────────────────────────────────────────────────────
 // Matches the physical E4/E5000 front panel layout.
 
-#define BTN_W      52.0
-#define BTN_H      20.0
-#define BTN_GAP    4.0
+#define BTN_W      104.0
+#define BTN_H      40.0
+#define BTN_GAP    8.0
 #define BTN_ROW    (BTN_H + BTN_GAP)
 
 static tButton   gButtons[] = {
@@ -180,20 +180,28 @@ static tButton   gButtons[] = {
 
 static const int NUM_BUTTONS = (int)(sizeof(gButtons) / sizeof(gButtons[0]));
 
-double button_panel_height(void) {
-    return (BTN_ROW * 4) + BTN_GAP;
+double button_panel_height(double areaWidth) {
+    int cols = (int)((areaWidth - BTN_GAP) / (BTN_W + BTN_GAP));
+
+    if (cols < 1) {
+        cols = 1;
+    }
+    int rows = (NUM_BUTTONS + cols - 1) / cols;
+    return (BTN_ROW * rows) + BTN_GAP;
 }
 
 void render_button_panel(tRectangle area) {
     double startX   = area.coord.x + BTN_GAP;
     double startY   = area.coord.y + BTN_GAP;
-    double cols     = 13.0;
+    int    cols     = (int)((area.size.w - BTN_GAP) / (BTN_W + BTN_GAP));
     double x        = startX;
     double y        = startY;
-    int    rowCount = 0;
     int    colCount = 0;
 
-    // Simple grid layout: 13 per row
+    if (cols < 1) {
+        cols = 1;
+    }
+
     for (int i = 0; i < NUM_BUTTONS; i++) {
         tButton * btn   = &gButtons[i];
 
@@ -208,16 +216,15 @@ void render_button_panel(tRectangle area) {
         set_rgb_colour(col);
         render_rectangle(mainArea, btn->rectangle);
         set_rgb_colour((tRgb)RGB_WHITE);
-        render_text(mainArea, (tRectangle){{x + 2.0, y + 5.0}, {0.0, 9.0}}, (char *)btn->label);
+        render_text(mainArea, (tRectangle){{x + 4.0, y + BTN_H * 0.2}, {0.0, BTN_H * 0.6}}, (char *)btn->label);
 
         x             += BTN_W + BTN_GAP;
         colCount++;
 
-        if (colCount >= (int)cols) {
+        if (colCount >= cols) {
             colCount = 0;
             x        = startX;
             y       += BTN_ROW;
-            rowCount++;
         }
     }
 }

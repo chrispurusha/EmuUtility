@@ -189,7 +189,7 @@ static void render_frame(GLFWwindow * win) {
 
     tRectangle mainArea = {{0.0, 0.0}, {logW, logH}};
     tRectangle lcdArea  = {{lcdX, lcdY}, {lcdDispW, lcdDispH}};
-    tRectangle btnArea  = {{lcdX, lcdY + lcdDispH + 8.0}, {lcdDispW, button_panel_height()}};
+    tRectangle btnArea  = {{0.0, lcdY + lcdDispH + 8.0}, {logW, button_panel_height(logW)}};
 
     render_lcd(lcdArea);
     render_button_panel(btnArea);

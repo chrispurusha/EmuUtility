@@ -321,12 +321,11 @@ tRectangle render_line(tArea area, tCoord start, tCoord end, double thickness) {
         start     = scale_scroll_adjust_coord(start);
         end       = scale_scroll_adjust_coord(end);
         thickness = scale(thickness);
+        start     = global_scale_coord(start);
+        end       = global_scale_coord(end);
+        thickness = global_scale(thickness);
     }
     retRectangle = {{0.0, 0.0}, {0.0, 0.0}};
-
-    start        = global_scale_coord(start);
-    end          = global_scale_coord(end);
-    thickness    = global_scale(thickness);
 
     internal_render_line(start, end, thickness);
 
@@ -338,10 +337,9 @@ tRectangle render_rectangle(tArea area, tRectangle rectangle) {
 
     if (area == moduleArea) {
         rectangle = scale_scroll_adjust_rectangle(rectangle);
+        rectangle = global_scale_rectangle(rectangle);
     }
     retRectangle = rectangle;
-
-    rectangle    = global_scale_rectangle(rectangle);
 
     internal_render_rectangle(rectangle);
 
@@ -356,27 +354,26 @@ tRectangle render_rectangle_with_border(tArea area, tRectangle rectangle) {
     if (area == moduleArea) {
         rectangle       = scale_scroll_adjust_rectangle(rectangle);
         borderLineWidth = scale(borderLineWidth);
+        rectangle       = global_scale_rectangle(rectangle);
+        borderLineWidth = global_scale(borderLineWidth);
     }
-    retRectangle    = rectangle;
-
-    rectangle       = global_scale_rectangle(rectangle);
-    borderLineWidth = global_scale(borderLineWidth);
+    retRectangle = rectangle;
 
     tRectangle line            = {0};
 
     internal_render_rectangle(rectangle);
 
     set_rgb_colour(RGB_BLACK);
-    line            = {{rectangle.coord.x, rectangle.coord.y + rectangle.size.h - borderLineWidth}, {rectangle.size.w, borderLineWidth}};
+    line         = {{rectangle.coord.x, rectangle.coord.y + rectangle.size.h - borderLineWidth}, {rectangle.size.w, borderLineWidth}};
     internal_render_rectangle(line); //Bottom
     set_rgb_colour(RGB_WHITE);
-    line            = {{rectangle.coord.x, rectangle.coord.y}, {borderLineWidth, rectangle.size.h}};
+    line         = {{rectangle.coord.x, rectangle.coord.y}, {borderLineWidth, rectangle.size.h}};
     internal_render_rectangle(line); //Left
     set_rgb_colour(RGB_WHITE);
-    line            = {{rectangle.coord.x, rectangle.coord.y}, {rectangle.size.w, borderLineWidth}};
+    line         = {{rectangle.coord.x, rectangle.coord.y}, {rectangle.size.w, borderLineWidth}};
     internal_render_rectangle(line); // Top
     set_rgb_colour(RGB_BLACK);
-    line            = {{rectangle.coord.x + rectangle.size.w - borderLineWidth, rectangle.coord.y}, {borderLineWidth, rectangle.size.h}};
+    line         = {{rectangle.coord.x + rectangle.size.w - borderLineWidth, rectangle.coord.y}, {borderLineWidth, rectangle.size.h}};
     internal_render_rectangle(line); // Right
 
     return retRectangle;
@@ -389,12 +386,11 @@ tRectangle render_triangle(tArea area, tTriangle triangle) {
         triangle.coord1    = scale_scroll_adjust_coord(triangle.coord1);
         triangle.coord2rel = scale_scroll_adjust_coord(triangle.coord2rel);
         triangle.coord3rel = scale_scroll_adjust_coord(triangle.coord3rel);
+        triangle.coord1    = global_scale_coord(triangle.coord1);
+        triangle.coord2rel = global_scale_coord(triangle.coord2rel);
+        triangle.coord3rel = global_scale_coord(triangle.coord3rel);
     }
-    retRectangle       = {{0.0, 0.0}, {0.0, 0.0}};
-
-    triangle.coord1    = global_scale_coord(triangle.coord1);
-    triangle.coord2rel = global_scale_coord(triangle.coord2rel);
-    triangle.coord3rel = global_scale_coord(triangle.coord3rel);
+    retRectangle = {{0.0, 0.0}, {0.0, 0.0}};
 
     glBegin(GL_POLYGON);
     glVertex2f(triangle.coord1.x, triangle.coord1.y);
@@ -412,12 +408,11 @@ tRectangle render_circle_line(tArea area, tCoord coord, double radius, int segme
         coord     = scale_scroll_adjust_coord(coord);
         radius    = scale(radius);
         thickness = scale(thickness); // WAS OUTSIDE. Hmmmm
+        coord     = global_scale_coord(coord);
+        radius    = global_scale(radius);
+        thickness = global_scale(thickness);
     }
     retRectangle = {{coord.x - radius, coord.y - radius}, {radius *2.0, radius *2.0}};
-
-    coord        = global_scale_coord(coord);
-    radius       = global_scale(radius);
-    thickness    = global_scale(thickness);
 
     const double DEG_TO_RAD     = 2.0 * M_PI / (double)segments;
     double       half_thickness = thickness * 0.5;
@@ -449,11 +444,10 @@ tRectangle render_circle_part(tArea area, tCoord coord, double radius, int segme
     if (area == moduleArea) {
         coord  = scale_scroll_adjust_coord(coord);
         radius = scale(radius);
+        coord  = global_scale_coord(coord);
+        radius = global_scale(radius);
     }
     retRectangle = {{coord.x - radius, coord.y - radius}, {radius *2.0, radius *2.0}};
-
-    coord        = global_scale_coord(coord);
-    radius       = global_scale(radius);
 
     internal_render_circle_part(coord, radius, segments, startSeg, numSegs);
 
@@ -466,11 +460,10 @@ tRectangle render_circle_part_angle(tArea area, tCoord coord, double radius, dou
     if (area == moduleArea) {
         coord  = scale_scroll_adjust_coord(coord);
         radius = scale(radius);
+        coord  = global_scale_coord(coord);
+        radius = global_scale(radius);
     }
     retRectangle = {{coord.x - radius, coord.y - radius}, {radius *2.0, radius *2.0}};
-
-    coord        = global_scale_coord(coord);
-    radius       = global_scale(radius);
 
     double     angle        = 0.0;
     double     x            = 0.0;
@@ -513,12 +506,11 @@ tRectangle render_radial_line(tArea area, tCoord coord, double radius, double an
         coord     = scale_scroll_adjust_coord(coord);
         radius    = scale(radius);
         thickness = scale(thickness);
+        coord     = global_scale_coord(coord);
+        radius    = global_scale(radius);
+        thickness = global_scale(thickness);
     }
     retRectangle = {{coord.x - radius, coord.y - radius}, {radius *2.0, radius *2.0}};
-
-    coord        = global_scale_coord(coord);
-    radius       = global_scale(radius);
-    thickness    = global_scale(thickness);
 
     double     angle        = 0.0;
     double     x            = 0.0;
@@ -556,10 +548,10 @@ tRectangle render_bezier_curve(tArea area, tCoord start, tCoord control, tCoord 
     // glGetFloatv with GL_CURRENT_COLOR fills all 4 components; use a proper array
     float        rgba[4]        = {0};
     glGetFloatv(GL_CURRENT_COLOR, rgba);
-    baseR        = rgba[0];
-    baseG        = rgba[1];
-    baseB        = rgba[2];
-    baseA        = rgba[3];
+    baseR = rgba[0];
+    baseG = rgba[1];
+    baseB = rgba[2];
+    baseA = rgba[3];
 
     // Derive highlight (top-lit) and shadow colours from base
     // Light source assumed at top — normal pointing up (negative screen-y) = highlight
@@ -578,13 +570,12 @@ tRectangle render_bezier_curve(tArea area, tCoord start, tCoord control, tCoord 
         control   = scale_scroll_adjust_coord(control);
         end       = scale_scroll_adjust_coord(end);
         thickness = scale(thickness);
+        start     = global_scale_coord(start);
+        control   = global_scale_coord(control);
+        end       = global_scale_coord(end);
+        thickness = global_scale(thickness);
     }
     retRectangle = {{0.0, 0.0}, {0.0, 0.0}};
-
-    start        = global_scale_coord(start);
-    control      = global_scale_coord(control);
-    end          = global_scale_coord(end);
-    thickness    = global_scale(thickness);
 
     glBegin(GL_TRIANGLE_STRIP);
 
@@ -645,10 +636,9 @@ tRectangle draw_power_button(tArea area, tRectangle rectangle, bool active) {
 
     if (area == moduleArea) {
         rectangle = scale_scroll_adjust_rectangle(rectangle);
+        rectangle = global_scale_rectangle(rectangle);
     }
     retRectangle  = rectangle;
-
-    rectangle     = global_scale_rectangle(rectangle);
 
     if (active) {
         set_rgb_colour(RGB_GREEN_ON);         // Green when ON
@@ -682,11 +672,10 @@ tRectangle draw_button(tArea area, tRectangle rectangle, const char * text, tRgb
     if (area == moduleArea) {
         rectangle     = scale_scroll_adjust_rectangle(rectangle);
         textRectangle = scale_scroll_adjust_rectangle(textRectangle);
+        rectangle     = global_scale_rectangle(rectangle);
+        textRectangle = global_scale_rectangle(textRectangle);
     }
     retRectangle           = rectangle;
-
-    rectangle              = global_scale_rectangle(rectangle);
-    textRectangle          = global_scale_rectangle(textRectangle);
 
     //if (isPressed == true) {
     //    set_rgb_colour((tRgb)RGB_GREY_7);
@@ -729,9 +718,9 @@ tRectangle draw_slider(tArea area, tRectangle rectangle, uint32_t value, uint32_
 
     if (area == moduleArea) {
         rectangle = scale_scroll_adjust_rectangle(rectangle);
+        rectangle = global_scale_rectangle(rectangle);
     }
     retRectangle = rectangle;
-    rectangle    = global_scale_rectangle(rectangle);
 
     trackH       = rectangle.size.h;
     fillHeight   = (range > 1) ? ((double)value / (double)(range - 1)) * trackH : 0.0;
@@ -795,10 +784,9 @@ tRectangle render_text(tArea area, tRectangle rectangle, const char * text) {
 
     if (area == moduleArea) {
         rectangle = scale_scroll_adjust_rectangle(rectangle);
+        rectangle = global_scale_rectangle(rectangle);
     }
     retRectangle = rectangle;
-
-    rectangle    = global_scale_rectangle(rectangle);
 
     internal_render_text(rectangle, text);
 

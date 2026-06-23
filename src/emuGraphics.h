@@ -40,7 +40,7 @@ void init_lcd_texture(void);
 tButton * button_at(tCoord coord);
 
 // Total panel height needed for buttons below the LCD.
-double button_panel_height(void);
+double button_panel_height(double areaWidth);
 
 #ifdef __cplusplus
 }
