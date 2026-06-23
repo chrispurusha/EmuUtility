@@ -294,6 +294,28 @@ static void * midi_thread(void * arg) {
 
     LOG_DEBUG("MIDI thread started\n");
 
+    // Create MIDI client here (not on main thread) so MIDIClientCreate does not
+    // block app startup.  The notification callback is tied to this thread's
+    // CFRunLoop, which we drive with CFRunLoopRunInMode in place of nanosleep.
+    OSStatus err;
+    err = MIDIClientCreate(CFSTR("EmuUtility"), midi_notify_cb, NULL, &gMidiClient);
+
+    if (err != noErr) {
+        LOG_ERROR("MIDIClientCreate failed: %d\n", (int)err);
+        return NULL;
+    }
+    err = MIDIInputPortCreate(gMidiClient, CFSTR("EmuUtility In"), midi_read_cb, NULL, &gMidiInPort);
+
+    if (err != noErr) {
+        LOG_ERROR("MIDIInputPortCreate failed: %d\n", (int)err);
+        return NULL;
+    }
+    err = MIDIOutputPortCreate(gMidiClient, CFSTR("EmuUtility Out"), &gMidiOutPort);
+
+    if (err != noErr) {
+        LOG_ERROR("MIDIOutputPortCreate failed: %d\n", (int)err);
+        return NULL;
+    }
     midi_scan_devices();
 
     while (!atomic_load(&gQuitAll)) {
@@ -319,13 +341,13 @@ static void * midi_thread(void * arg) {
                 }
             }
         }
-        // Sleep short when work is in progress so LCD updates are picked up
-        // quickly after each button press; idle at ~30 Hz otherwise.
-        bool            busy = atomic_load(&gLcdPending)
-                               || atomic_load(&gNeedLcdFull)
-                               || atomic_load(&gNeedLcdDelta);
-        struct timespec ts   = {0, busy ? 5000000 : 33000000};
-        nanosleep(&ts, NULL);
+        // Drive this thread's CFRunLoop so the midi_notify_cb fires here.
+        // Use a short interval when work is in progress, idle at ~30 Hz otherwise.
+        bool   busy    = atomic_load(&gLcdPending)
+                         || atomic_load(&gNeedLcdFull)
+                         || atomic_load(&gNeedLcdDelta);
+        double seconds = busy ? 0.005 : 0.033;
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);
     }
     LOG_DEBUG("MIDI thread exiting\n");
     return NULL;
@@ -334,30 +356,6 @@ static void * midi_thread(void * arg) {
 // ── Startup ───────────────────────────────────────────────────────────────────
 
 int start_midi_thread(void) {
-    CFStringRef clientName = CFSTR("EmuUtility");
-    OSStatus    err;
-
-    err = MIDIClientCreate(clientName, midi_notify_cb, NULL, &gMidiClient);
-
-    if (err != noErr) {
-        LOG_ERROR("MIDIClientCreate failed: %d\n", (int)err);
-        return EXIT_FAILURE;
-    }
-    CFStringRef inName     = CFSTR("EmuUtility In");
-    err = MIDIInputPortCreate(gMidiClient, inName, midi_read_cb, NULL, &gMidiInPort);
-
-    if (err != noErr) {
-        LOG_ERROR("MIDIInputPortCreate failed: %d\n", (int)err);
-        return EXIT_FAILURE;
-    }
-    CFStringRef outName    = CFSTR("EmuUtility Out");
-    err = MIDIOutputPortCreate(gMidiClient, outName, &gMidiOutPort);
-
-    if (err != noErr) {
-        LOG_ERROR("MIDIOutputPortCreate failed: %d\n", (int)err);
-        return EXIT_FAILURE;
-    }
-
     if (pthread_create(&gMidiThread, NULL, midi_thread, NULL) != 0) {
         LOG_ERROR("pthread_create for MIDI thread failed\n");
         return EXIT_FAILURE;
