@@ -179,7 +179,7 @@ static void render_frame(GLFWwindow * win) {
     glClear(GL_COLOR_BUFFER_BIT);
 
     double     logW     = TARGET_FRAME_BUFF_WIDTH;
-    double     logH     = TARGET_FRAME_BUFF_HEIGHT;
+    //double     logH     = TARGET_FRAME_BUFF_HEIGHT;
 
     // LCD area: centred, 4× the raw 240×64 pixel size
     double     lcdDispW = LCD_WIDTH * 4.0;
@@ -187,7 +187,7 @@ static void render_frame(GLFWwindow * win) {
     double     lcdX     = (logW - lcdDispW) / 2.0;
     double     lcdY     = 20.0;
 
-    tRectangle mainArea = {{0.0, 0.0}, {logW, logH}};
+    //tRectangle mainArea = {{0.0, 0.0}, {logW, logH}};
     tRectangle lcdArea  = {{lcdX, lcdY}, {lcdDispW, lcdDispH}};
     tRectangle btnArea  = {{0.0, lcdY + lcdDispH + 8.0}, {logW, button_panel_height(logW)}};
 

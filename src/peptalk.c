@@ -208,17 +208,41 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
         case PEPTALK_LCD_DUMP_RESP:
         {
-            // Full dump: unpack 7-bit payload directly into gLcd.pixels
+            LOG_DEBUG("peptalk LCD dump resp payloadLen=%u\n", (unsigned)payloadLen);
+
             if (payloadLen < 10) {
                 break;
             }
             uint8_t  tmp[LCD_BYTES + 16];
             uint32_t unpacked = peptalk_unpack_7bit(payload + 10, payloadLen - 10, tmp, sizeof(tmp));
 
+            LOG_DEBUG("peptalk LCD dump unpacked=%u (need %u)\n", (unsigned)unpacked, (unsigned)LCD_BYTES);
+
             if (unpacked >= LCD_BYTES) {
                 memcpy(gLcd.pixels, tmp, LCD_BYTES);
                 gLcd.refresh++;
                 atomic_store(&gNeedLcdFull, false);
+                atomic_store(&gNeedLcdDelta, false);
+                atomic_store(&gReDraw, true);
+            }
+            break;
+        }
+
+        case PEPTALK_LCD_DELTA_RESP:
+        {
+            LOG_DEBUG("peptalk LCD delta resp payloadLen=%u\n", (unsigned)payloadLen);
+
+            if (payloadLen < 10) {
+                break;
+            }
+            uint8_t  tmp[LCD_BYTES + 16];
+            uint32_t unpacked = peptalk_unpack_7bit(payload + 10, payloadLen - 10, tmp, sizeof(tmp));
+
+            LOG_DEBUG("peptalk LCD delta unpacked=%u\n", (unsigned)unpacked);
+
+            if (unpacked > 0) {
+                peptalk_apply_lcd_delta(tmp, unpacked);
+                gLcd.refresh++;
                 atomic_store(&gNeedLcdDelta, false);
                 atomic_store(&gReDraw, true);
             }

@@ -60,6 +60,7 @@
 #define PEPTALK_LCD_DUMP_RESP         (0x50)
 #define PEPTALK_LCD_DUMP_REQ          (0x51)
 #define PEPTALK_LCD_DELTA_REQ         (0x52)
+#define PEPTALK_LCD_DELTA_RESP        (0x53)
 #define PEPTALK_LED_STATE_REQ         (0x60)
 #define PEPTALK_LED_STATE_RESP        (0x61)
 #define PEPTALK_SESSION_STATUS        (0x7F)

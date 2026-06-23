@@ -1157,8 +1157,8 @@ void set_zoom_factor(double newZoom, tCoord mouseCoord) {
     gYScrollPercent = (maxScrollY > 0.0) ? (newScrollY / maxScrollY) * 100.0 : 0.0;
 
     // Sync scrollbar thumb positions to match new percent
-    double renderWidth  = get_render_width() / gGlobalGuiScale;
-    double renderHeight = get_render_height() / gGlobalGuiScale;
+    //double renderWidth  = get_render_width() / gGlobalGuiScale;
+    //double renderHeight = get_render_height() / gGlobalGuiScale;
 
     // gScrollState not used in EmuUtility
 }
