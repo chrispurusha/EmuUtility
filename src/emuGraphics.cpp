@@ -118,10 +118,23 @@ void render_lcd(tRectangle area) {
 // ── Button layout ─────────────────────────────────────────────────────────────
 // Matches the physical E4/E5000 front panel layout.
 
-#define BTN_W      104.0
-#define BTN_H      40.0
-#define BTN_GAP    8.0
-#define BTN_ROW    (BTN_H + BTN_GAP)
+// Left-panel button geometry
+#define LP_W          168.0
+#define LP_H          40.0
+#define LP_GAP        8.0
+#define LP_ROW        (LP_H + LP_GAP)
+
+// Right-section absolute x positions
+#define RP_DEC_X      1792.0 // DEC button
+#define RP_DEC_W      120.0
+#define RP_NAV_X      1840.0 // navigation cluster left edge
+#define RP_NAV_SZ     40.0   // nav arrow button size (square)
+#define RP_NAV_STR    48.0   // nav stride (NAV_SZ + LP_GAP)
+#define RP_NP_X       2064.0 // numpad left edge
+#define RP_NP_W       112.0  // numpad button width
+#define RP_NP_STR     120.0  // numpad stride (NP_W + LP_GAP)
+#define RP_INC_X      2432.0 // INC button
+#define RP_INC_W      120.0
 
 static tButton   gButtons[] = {
     // Row 0 — main section buttons
@@ -182,50 +195,93 @@ static tButton   gButtons[] = {
 static const int NUM_BUTTONS = (int)(sizeof(gButtons) / sizeof(gButtons[0]));
 
 double button_panel_height(double areaWidth) {
-    int cols = (int)((areaWidth - BTN_GAP) / (BTN_W + BTN_GAP));
+    (void)areaWidth;
+    // 1 DEC/INC row + 4 numpad rows, bordered by LP_GAP margins
+    return 5.0 * LP_H + 6.0 * LP_GAP;
+}
 
-    if (cols < 1) {
-        cols = 1;
+static tButton * find_button(tButtonKey key) {
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        if (gButtons[i].key == key) {
+            return &gButtons[i];
+        }
     }
-    int rows = (NUM_BUTTONS + cols - 1) / cols;
-    return (BTN_ROW * rows) + BTN_GAP;
+
+    return NULL;
+}
+
+static void render_button_at(tButtonKey key, double x, double y, double w, double h) {
+    tButton * btn   = find_button(key);
+
+    if (btn == NULL) {
+        return;
+    }
+    btn->rectangle = (tRectangle){{
+                                      x, y
+                                  }, {w, h}};
+
+    uint32_t  leds  = atomic_load(&gLeds);
+    bool      ledOn = btn->hasLed && (leds & (1u << btn->ledIndex));
+    tRgb      col   = btn->pressed ? (tRgb)RGB_AMBER : ledOn ? (tRgb)RGB_GREEN_ON : (tRgb)RGB_GREY_3;
+
+    set_rgb_colour(col);
+    render_rectangle(mainArea, btn->rectangle);
+    set_rgb_colour((tRgb)RGB_WHITE);
+    render_text(mainArea, (tRectangle){{x + 4.0, y + h * 0.2}, {0.0, h * 0.6}}, (char *)btn->label);
 }
 
 void render_button_panel(tRectangle area) {
-    double startX   = area.coord.x + BTN_GAP;
-    double startY   = area.coord.y + BTN_GAP;
-    int    cols     = (int)((area.size.w - BTN_GAP) / (BTN_W + BTN_GAP));
-    double x        = startX;
-    double y        = startY;
-    int    colCount = 0;
+    double                  ox          = area.coord.x;
+    double                  oy          = area.coord.y;
 
-    if (cols < 1) {
-        cols = 1;
+    // Clear stale hit rectangles for buttons not placed in this layout
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        gButtons[i].rectangle = (tRectangle){{
+                                                 0.0, 0.0
+                                             }, {0.0, 0.0}};
     }
 
-    for (int i = 0; i < NUM_BUTTONS; i++) {
-        tButton * btn   = &gButtons[i];
+    // Row y positions
+    double                  r0          = oy + LP_GAP;
+    double                  r1          = r0 + LP_ROW;
+    double                  r2          = r1 + LP_ROW;
 
-        btn->rectangle = (tRectangle){{
-                                          x, y
-                                      }, {BTN_W, BTN_H}};
+    // ── Left panel: 2 rows × 10 columns ──────────────────────────────────────
+    static const tButtonKey lp_row0[10] = {pkMaster, pkPresetManage, pkPresetEdit, pkAudition,
+                                           pkF1,     pkF2,           pkF3,         pkF4,      pkF5, pkF6};
+    static const tButtonKey lp_row1[10] = {pkDisk,    pkSampleManage, pkSampleEdit,
+                                           pkAssign1, pkAssign2,      pkAssign3,
+                                           pkExit,    pkPrev,         pkNext, pkEnter};
 
-        uint32_t  leds  = atomic_load(&gLeds);
-        bool      ledOn = btn->hasLed && (leds & (1u << btn->ledIndex));
-        tRgb      col   = btn->pressed ? (tRgb)RGB_AMBER : ledOn ? (tRgb)RGB_GREEN_ON : (tRgb)RGB_GREY_3;
+    for (int c = 0; c < 10; c++) {
+        double x = ox + LP_GAP + c * (LP_W + LP_GAP);
+        render_button_at(lp_row0[c], x, r0, LP_W, LP_H);
+        render_button_at(lp_row1[c], x, r1, LP_W, LP_H);
+    }
 
-        set_rgb_colour(col);
-        render_rectangle(mainArea, btn->rectangle);
-        set_rgb_colour((tRgb)RGB_WHITE);
-        render_text(mainArea, (tRectangle){{x + 4.0, y + BTN_H * 0.2}, {0.0, BTN_H * 0.6}}, (char *)btn->label);
+    // ── Right section ─────────────────────────────────────────────────────────
+    // DEC and INC flank the nav/numpad cluster at the top row
+    render_button_at(pkDec, ox + RP_DEC_X, r0, RP_DEC_W, LP_H);
+    render_button_at(pkInc, ox + RP_INC_X, r0, RP_INC_W, LP_H);
 
-        x             += BTN_W + BTN_GAP;
-        colCount++;
+    // Navigation: Up centred above Left / Down / Right (shifted down one row)
+    render_button_at(pkUp, ox + RP_NAV_X + RP_NAV_STR, r2, RP_NAV_SZ, LP_H);
+    render_button_at(pkLeft, ox + RP_NAV_X, r2 + LP_ROW, RP_NAV_SZ, LP_H);
+    render_button_at(pkDown, ox + RP_NAV_X + RP_NAV_STR, r2 + LP_ROW, RP_NAV_SZ, LP_H);
+    render_button_at(pkRight, ox + RP_NAV_X + 2.0 * RP_NAV_STR, r2 + LP_ROW, RP_NAV_SZ, LP_H);
 
-        if (colCount >= cols) {
-            colCount = 0;
-            x        = startX;
-            y       += BTN_ROW;
+    // Numpad: 3 columns × 4 rows
+    static const tButtonKey np[4][3] = {
+        {pkNumpad1,         pkNumpad2, pkNumpad3  },
+        {pkNumpad4,         pkNumpad5, pkNumpad6  },
+        {pkNumpad7,         pkNumpad8, pkNumpad9  },
+        {pkNumpadPlusMinus, pkNumpad0, pkNumpadDot}, };
+
+    for (int nr = 0; nr < 4; nr++) {
+        double ny = r1 + nr * LP_ROW;
+
+        for (int nc = 0; nc < 3; nc++) {
+            render_button_at(np[nr][nc], ox + RP_NP_X + nc * RP_NP_STR, ny, RP_NP_W, LP_H);
         }
     }
 }
