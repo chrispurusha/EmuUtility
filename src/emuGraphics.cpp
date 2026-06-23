@@ -88,9 +88,10 @@ void render_lcd(tRectangle area) {
     double w = area.size.w;
     double h = area.size.h;
 
-    // Background fill
+    // Green border around the display area
     set_rgb_colour((tRgb)RGB_LCD_BG);
-    render_rectangle(mainArea, (tRectangle){{x, y}, {w, h}});
+    render_rectangle(mainArea, (tRectangle){{x - LCD_BORDER, y - LCD_BORDER},
+                                            {w + LCD_BORDER * 2.0, h + LCD_BORDER * 2.0}});
 
     if (!atomic_load(&gSessionOpen)) {
         return;

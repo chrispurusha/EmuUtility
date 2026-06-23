@@ -26,6 +26,8 @@
 extern "C" {
 #endif
 
+#define LCD_BORDER    12.0   // green surround around the LCD texture
+
 // Render the 240×64 LCD bitmap, scaled to fit the given rectangle.
 void render_lcd(tRectangle area);
 
