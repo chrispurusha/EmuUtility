@@ -37,9 +37,14 @@ static tCoord window_to_logical(void * win, double x, double y) {
     extern void glfwGetWindowSize(void *, int *, int *);
     glfwGetWindowSize(win, &winW, &winH);
 
+    // utilsGraphics render functions apply global_scale (gGlobalGuiScale) to all
+    // mainArea coordinates before passing to OpenGL, so hit-test coordinates must
+    // use the same pre-scale space as btn->rectangle.  Dividing by gGlobalGuiScale
+    // here cancels that factor out.
+    double scale = (gGlobalGuiScale > 0.0) ? gGlobalGuiScale : 1.0;
     tCoord coord = {
-        .x = (winW > 0) ? (x / winW) * TARGET_FRAME_BUFF_WIDTH : x,
-        .y = (winH > 0) ? (y / winH) * TARGET_FRAME_BUFF_HEIGHT : y,
+        .x = (winW > 0) ? (x / winW) * TARGET_FRAME_BUFF_WIDTH / scale : x,
+        .y = (winH > 0) ? (y / winH) * TARGET_FRAME_BUFF_HEIGHT / scale : y,
     };
     return coord;
 }
@@ -53,6 +58,9 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     tCoord    coord   = window_to_logical(win, x, y);
     bool      pressed = (action == 1);   // GLFW_PRESS == 1
 
+    LOG_DEBUG("mouse %s win(%.0f,%.0f) logical(%.0f,%.0f)\n",
+              pressed ? "press" : "release", x, y, coord.x, coord.y);
+
     if (close_context_menu_if_outside(coord)) {
         return;
     }
@@ -63,10 +71,13 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     tButton * btn     = button_at(coord);
 
     if (btn != NULL) {
+        LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
         btn->pressed = pressed;
         peptalk_send_button_event(btn->key, pressed);
         atomic_store(&gNeedLcdDelta, true);
         atomic_store(&gReDraw, true);
+    } else {
+        LOG_DEBUG("no button at logical(%.0f,%.0f)\n", coord.x, coord.y);
     }
 }
 
