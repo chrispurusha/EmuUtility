@@ -44,9 +44,15 @@ static tCoord window_to_logical(void * win, double x, double y) {
     return coord;
 }
 
-static bool   gDialDrag  = false;
-static double gDialDragY = 0.0;
-static double gDialAccum = 0.0;
+#define GLFW_CURSOR             0x00033001
+#define GLFW_CURSOR_NORMAL      0x00034001
+#define GLFW_CURSOR_DISABLED    0x00034003
+
+static bool   gDialDrag   = false;
+static double gDialDragY  = 0.0;
+static double gDialAccum  = 0.0;
+static double gDialStartX = 0.0;
+static double gDialStartY = 0.0;
 
 void handle_mouse_button(void * win, int button, int action, int mods, double x, double y) {
     (void)mods;
@@ -67,18 +73,23 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     if (handle_context_menu_click(coord)) {
         return;
     }
+    extern void glfwSetInputMode(void *, int, int);
+    extern void glfwSetCursorPos(void *, double, double);
 
     if (pressed && dial_hit_test(coord)) {
-        gDialDrag  = true;
-        gDialDragY = y;
-        gDialAccum = 0.0;
+        gDialDrag   = true;
+        gDialDragY  = y;
+        gDialAccum  = 0.0;
+        gDialStartX = x;
+        gDialStartY = y;
+        glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         return;
     }
 
     if (!pressed && gDialDrag) {
         gDialDrag = false;
-        // Request a full LCD dump once dragging stops so delta-base state
-        // is clean after the burst of rotary events
+        glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+        glfwSetCursorPos(win, gDialStartX, gDialStartY);
         atomic_store(&gNeedLcdFull, true);
         atomic_store(&gReDraw, true);
         return;
