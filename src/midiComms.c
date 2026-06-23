@@ -319,7 +319,12 @@ static void * midi_thread(void * arg) {
                 }
             }
         }
-        struct timespec ts = {0, 33000000};   // ~30 Hz poll
+        // Sleep short when work is in progress so LCD updates are picked up
+        // quickly after each button press; idle at ~30 Hz otherwise.
+        bool            busy = atomic_load(&gLcdPending)
+                               || atomic_load(&gNeedLcdFull)
+                               || atomic_load(&gNeedLcdDelta);
+        struct timespec ts   = {0, busy ? 5000000 : 33000000};
         nanosleep(&ts, NULL);
     }
     LOG_DEBUG("MIDI thread exiting\n");

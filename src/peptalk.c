@@ -224,14 +224,11 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                 // Full frame — replace pixels entirely
                 memcpy(gLcd.pixels, tmp, LCD_BYTES);
                 gLcd.refresh++;
-                atomic_store(&gNeedLcdFull, false);
-                atomic_store(&gNeedLcdDelta, false);
                 atomic_store(&gReDraw, true);
             } else if (unpacked > 0) {
                 // Partial payload in same message type — treat as delta
                 peptalk_apply_lcd_delta(tmp, unpacked);
                 gLcd.refresh++;
-                atomic_store(&gNeedLcdDelta, false);
                 atomic_store(&gReDraw, true);
             }
             break;
