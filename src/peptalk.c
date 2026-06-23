@@ -273,15 +273,9 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
         case PEPTALK_BUTTON_EVENT:
         {
-            // Echo from device; Inc/Dec always use full dump to avoid delta corruption
-            tButtonKey key = (payloadLen >= 1) ? (tButtonKey)payload[0] : (tButtonKey)0;
-
-            if (key == pkInc || key == pkDec) {
-                atomic_store(&gNeedLcdFull, true);
-                atomic_store(&gNeedLcdDelta, false);
-            } else {
-                atomic_store(&gNeedLcdDelta, true);
-            }
+            // Always request a full dump on any button echo; see mouseHandle.c.
+            atomic_store(&gNeedLcdFull, true);
+            atomic_store(&gNeedLcdDelta, false);
             atomic_store(&gReDraw, true);
             break;
         }

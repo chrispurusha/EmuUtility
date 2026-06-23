@@ -100,15 +100,11 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
         LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
         btn->pressed = pressed;
         peptalk_send_button_event(btn->key, pressed);
-
-        // Inc/Dec can change large portions of the display; deltas are
-        // unreliable after rapid presses, so always fetch a fresh full dump
-        if (btn->key == pkInc || btn->key == pkDec) {
-            atomic_store(&gNeedLcdFull, true);
-            atomic_store(&gNeedLcdDelta, false);
-        } else {
-            atomic_store(&gNeedLcdDelta, true);
-        }
+        // Always request a full dump after any button press. Deltas are only
+        // safe when we know the hardware's base state hasn't drifted — button
+        // presses can change the display in ways that compound delta errors.
+        atomic_store(&gNeedLcdFull, true);
+        atomic_store(&gNeedLcdDelta, false);
         atomic_store(&gReDraw, true);
     } else {
         LOG_DEBUG("no button at logical(%.0f,%.0f)\n", coord.x, coord.y);
@@ -186,13 +182,8 @@ void handle_key(void * win, int key, int scancode, int action, int mods) {
     if (found) {
         peptalk_send_button_event(bk, true);
         peptalk_send_button_event(bk, false);
-
-        if (bk == pkInc || bk == pkDec) {
-            atomic_store(&gNeedLcdFull, true);
-            atomic_store(&gNeedLcdDelta, false);
-        } else {
-            atomic_store(&gNeedLcdDelta, true);
-        }
+        atomic_store(&gNeedLcdFull, true);
+        atomic_store(&gNeedLcdDelta, false);
         atomic_store(&gReDraw, true);
     }
 }

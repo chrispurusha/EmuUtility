@@ -304,17 +304,18 @@ static void * midi_thread(void * arg) {
                 peptalk_send_led_state_request();
                 atomic_store(&gNeedLeds, false);
             } else if (!atomic_load(&gLcdPending)) {
-                // Only send one LCD request at a time; wait for response before next
+                // Set the flag *before* sending so a fast response cannot clear
+                // it before we have a chance to set it (race on USB round-trip).
                 if (atomic_load(&gNeedLcdFull)) {
                     extern void peptalk_send_lcd_dump_request(void);
-                    peptalk_send_lcd_dump_request();
-                    atomic_store(&gNeedLcdFull, false);
                     atomic_store(&gLcdPending, true);
+                    atomic_store(&gNeedLcdFull, false);
+                    peptalk_send_lcd_dump_request();
                 } else if (atomic_load(&gNeedLcdDelta)) {
                     extern void peptalk_send_lcd_delta_request(void);
-                    peptalk_send_lcd_delta_request();
-                    atomic_store(&gNeedLcdDelta, false);
                     atomic_store(&gLcdPending, true);
+                    atomic_store(&gNeedLcdDelta, false);
+                    peptalk_send_lcd_delta_request();
                 }
             }
         }
