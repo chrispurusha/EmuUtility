@@ -273,8 +273,15 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
         case PEPTALK_BUTTON_EVENT:
         {
-            // Echo from device of a button state change — trigger LCD poll
-            atomic_store(&gNeedLcdDelta, true);
+            // Echo from device; Inc/Dec always use full dump to avoid delta corruption
+            tButtonKey key = (payloadLen >= 1) ? (tButtonKey)payload[0] : (tButtonKey)0;
+
+            if (key == pkInc || key == pkDec) {
+                atomic_store(&gNeedLcdFull, true);
+                atomic_store(&gNeedLcdDelta, false);
+            } else {
+                atomic_store(&gNeedLcdDelta, true);
+            }
             atomic_store(&gReDraw, true);
             break;
         }
