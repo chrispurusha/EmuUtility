@@ -58,8 +58,8 @@ typedef struct {
 #define RGB_GREY_7             {0.70, 0.70, 0.70}
 #define RGB_GREEN_ON           {0.00, 0.80, 0.00}
 #define RGB_AMBER              {1.00, 0.60, 0.00}
-#define RGB_LCD_BG             {0.18, 0.22, 0.18}  // dark green, like E-mu LCD
-#define RGB_LCD_FG             {0.70, 0.85, 0.60}  // lit pixel colour
+#define RGB_LCD_BG             {0.70, 0.85, 0.60}  // green background
+#define RGB_LCD_FG             {0.05, 0.07, 0.05}  // dark pixel colour
 
 // ── PEPTALK button key codes ─────────────────────────────────────────────────
 

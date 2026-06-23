@@ -208,7 +208,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
         case PEPTALK_LCD_DUMP_RESP:
         {
-            LOG_DEBUG("peptalk LCD dump resp payloadLen=%u\n", (unsigned)payloadLen);
+            LOG_DEBUG("peptalk LCD 0x50 payloadLen=%u\n", (unsigned)payloadLen);
 
             if (payloadLen < 10) {
                 break;
@@ -216,12 +216,19 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
             uint8_t  tmp[LCD_BYTES + 16];
             uint32_t unpacked = peptalk_unpack_7bit(payload + 10, payloadLen - 10, tmp, sizeof(tmp));
 
-            LOG_DEBUG("peptalk LCD dump unpacked=%u (need %u)\n", (unsigned)unpacked, (unsigned)LCD_BYTES);
+            LOG_DEBUG("peptalk LCD 0x50 unpacked=%u (full=%u)\n", (unsigned)unpacked, (unsigned)LCD_BYTES);
 
             if (unpacked >= LCD_BYTES) {
+                // Full frame — replace pixels entirely
                 memcpy(gLcd.pixels, tmp, LCD_BYTES);
                 gLcd.refresh++;
                 atomic_store(&gNeedLcdFull, false);
+                atomic_store(&gNeedLcdDelta, false);
+                atomic_store(&gReDraw, true);
+            } else if (unpacked > 0) {
+                // Partial payload in same message type — treat as delta
+                peptalk_apply_lcd_delta(tmp, unpacked);
+                gLcd.refresh++;
                 atomic_store(&gNeedLcdDelta, false);
                 atomic_store(&gReDraw, true);
             }
@@ -230,7 +237,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
         case PEPTALK_LCD_DELTA_RESP:
         {
-            LOG_DEBUG("peptalk LCD delta resp payloadLen=%u\n", (unsigned)payloadLen);
+            LOG_DEBUG("peptalk LCD 0x53 payloadLen=%u\n", (unsigned)payloadLen);
 
             if (payloadLen < 10) {
                 break;
@@ -238,7 +245,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
             uint8_t  tmp[LCD_BYTES + 16];
             uint32_t unpacked = peptalk_unpack_7bit(payload + 10, payloadLen - 10, tmp, sizeof(tmp));
 
-            LOG_DEBUG("peptalk LCD delta unpacked=%u\n", (unsigned)unpacked);
+            LOG_DEBUG("peptalk LCD 0x53 unpacked=%u\n", (unsigned)unpacked);
 
             if (unpacked > 0) {
                 peptalk_apply_lcd_delta(tmp, unpacked);
