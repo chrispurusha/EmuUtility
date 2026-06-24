@@ -41,7 +41,7 @@
 // Window
 #define WINDOW_TITLE                  "EmuUtility"
 #define TARGET_FRAME_BUFF_WIDTH       (2560)
-#define TARGET_FRAME_BUFF_HEIGHT      (1440)
+#define TARGET_FRAME_BUFF_HEIGHT      (1200)
 
 // LCD display geometry
 #define LCD_WIDTH                     (240)

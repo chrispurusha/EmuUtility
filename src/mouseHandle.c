@@ -38,8 +38,8 @@ static tCoord window_to_logical(void * win, double x, double y) {
     glfwGetWindowSize(win, &winW, &winH);
 
     tCoord coord = {
-        .x = (winW > 0) ? (x / winW) * TARGET_FRAME_BUFF_WIDTH : x,
-        .y = (winH > 0) ? (y / winH) * TARGET_FRAME_BUFF_HEIGHT : y,
+        .x = x * gGlobalGuiScale,
+        .y = y * gGlobalGuiScale,
     };
     return coord;
 }
