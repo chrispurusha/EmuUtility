@@ -183,11 +183,11 @@ static void render_frame(GLFWwindow * win) {
     double     logW     = TARGET_FRAME_BUFF_WIDTH;
     //double     logH     = TARGET_FRAME_BUFF_HEIGHT;
 
-    // LCD area: centred, 4× the raw 240×64 pixel size
-    double     lcdDispW = LCD_WIDTH * 4.0;
-    double     lcdDispH = LCD_HEIGHT * 4.0;
-    double     lcdX     = (logW - lcdDispW) / 2.0;
-    double     lcdY     = 20.0;
+    // LCD area: 2× the raw 240×64 pixel size, centred in left half of virtual space
+    double     lcdDispW = LCD_WIDTH * 2.0;
+    double     lcdDispH = LCD_HEIGHT * 2.0;
+    double     lcdX     = (logW / 2.0 - lcdDispW) / 2.0;
+    double     lcdY     = 10.0;
 
     //tRectangle mainArea = {{0.0, 0.0}, {logW, logH}};
     tRectangle lcdArea  = {{lcdX, lcdY}, {lcdDispW, lcdDispH}};

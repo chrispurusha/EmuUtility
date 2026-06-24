@@ -39,9 +39,9 @@ static uint32_t gLastRefresh = 0xFFFFFFFF;
 
 // ── Dial (large knob, right of LCD) ──────────────────────────────────────────
 
-#define DIAL_CX        2200.0
-#define DIAL_CY        148.0  // vertically centred on the LCD
-#define DIAL_RADIUS    120.0
+#define DIAL_CX        1100.0
+#define DIAL_CY        74.0   // vertically centred on the LCD
+#define DIAL_RADIUS    60.0
 #define DIAL_RANGE     128
 
 static uint32_t gDialValue   = 0;
@@ -167,22 +167,22 @@ void dial_nudge(int delta) {
 // Matches the physical E4/E5000 front panel layout.
 
 // Left-panel button geometry
-#define LP_W          168.0
-#define LP_H          40.0
-#define LP_GAP        8.0
+#define LP_W          84.0
+#define LP_H          20.0
+#define LP_GAP        4.0
 #define LP_ROW        (LP_H + LP_GAP)
 
 // Right-section absolute x positions
-#define RP_DEC_X      1792.0 // DEC button
-#define RP_DEC_W      120.0
-#define RP_NAV_X      1840.0 // navigation cluster left edge
-#define RP_NAV_SZ     40.0   // nav arrow button size (square)
-#define RP_NAV_STR    48.0   // nav stride (NAV_SZ + LP_GAP)
-#define RP_NP_X       2064.0 // numpad left edge
-#define RP_NP_W       112.0  // numpad button width
-#define RP_NP_STR     120.0  // numpad stride (NP_W + LP_GAP)
-#define RP_INC_X      2432.0 // INC button
-#define RP_INC_W      120.0
+#define RP_DEC_X      896.0  // DEC button
+#define RP_DEC_W      60.0
+#define RP_NAV_X      920.0  // navigation cluster left edge
+#define RP_NAV_SZ     20.0   // nav arrow button size (square)
+#define RP_NAV_STR    24.0   // nav stride (NAV_SZ + LP_GAP)
+#define RP_NP_X       1032.0 // numpad left edge
+#define RP_NP_W       56.0   // numpad button width
+#define RP_NP_STR     60.0   // numpad stride (NP_W + LP_GAP)
+#define RP_INC_X      1216.0 // INC button
+#define RP_INC_W      60.0
 
 static tButton   gButtons[] = {
     // Row 0 — main section buttons
