@@ -162,4 +162,17 @@ typedef struct {
     double alpha;
 } tRgba;
 
+// ── Scroll state ─────────────────────────────────────────────────────────────
+
+typedef struct {
+    double     xBar;
+    bool       xBarDragging;
+    double     xGrabOffset;
+    tRectangle xThumb;
+    double     yBar;
+    bool       yBarDragging;
+    double     yGrabOffset;
+    tRectangle yThumb;
+} tScrollState;
+
 #endif // __TYPES_H__

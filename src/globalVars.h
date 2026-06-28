@@ -30,6 +30,7 @@ extern _Atomic bool     gReDraw;
 // ── GLFW window ──────────────────────────────────────────────────────────────
 extern void *           gWindow;           // GLFWwindow*; void* avoids pulling GLFW into C headers
 extern double           gGlobalGuiScale;
+extern tScrollState     gScrollState;
 
 // ── MIDI / device ────────────────────────────────────────────────────────────
 extern tEmuDevice       gDevice;
