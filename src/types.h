@@ -21,15 +21,10 @@
 #define __TYPES_H__
 
 #include "defs.h"
+#include "synthlibDefs.h"
 #include "geometry.h"
 
 // ── Colour ──────────────────────────────────────────────────────────────────
-
-typedef struct {
-    double red;
-    double green;
-    double blue;
-} tRgb;
 
 #define RGB_BLACK              {0.00, 0.00, 0.00}
 #define RGB_WHITE              {1.00, 1.00, 1.00}
@@ -122,57 +117,5 @@ typedef struct {
     bool         hasLed;
     uint8_t      ledIndex;
 } tButton;
-
-// ── Graphics primitives (used by utilsGraphics) ──────────────────────────────
-
-typedef struct {
-    tCoord coord1;
-    tCoord coord2rel;
-    tCoord coord3rel;
-} tTriangle;
-
-typedef struct {
-    double u1;
-    double v1;
-    double u2;
-    double v2;
-    double advance_x;
-    int    width;
-    int    height;
-    int    offset_x;
-    int    offset_y;
-} GlyphInfo;
-
-typedef enum {
-    eNoCache,
-    eCache,
-} tCache;
-
-typedef enum {
-    mainArea,
-    moduleArea,
-} tArea;
-
-// ── RGBA colour (alpha) ───────────────────────────────────────────────────────
-
-typedef struct {
-    double red;
-    double green;
-    double blue;
-    double alpha;
-} tRgba;
-
-// ── Scroll state ─────────────────────────────────────────────────────────────
-
-typedef struct {
-    double     xBar;
-    bool       xBarDragging;
-    double     xGrabOffset;
-    tRectangle xThumb;
-    double     yBar;
-    bool       yBarDragging;
-    double     yGrabOffset;
-    tRectangle yThumb;
-} tScrollState;
 
 #endif // __TYPES_H__

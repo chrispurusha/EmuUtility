@@ -25,8 +25,8 @@ _Atomic bool     gQuitAll        = false;
 _Atomic bool     gReDraw         = true;
 
 void *           gWindow         = NULL;
-double           gGlobalGuiScale = 1.0;
-tScrollState     gScrollState    = {0};
+//double           gGlobalGuiScale = 1.0;
+//tScrollState     gScrollState    = {0};
 
 tEmuDevice       gDevice         = {0};
 MIDIClientRef    gMidiClient     = 0;
