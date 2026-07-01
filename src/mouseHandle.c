@@ -48,11 +48,12 @@ static tCoord window_to_logical(void * win, double x, double y) {
 #define GLFW_CURSOR_NORMAL      0x00034001
 #define GLFW_CURSOR_DISABLED    0x00034003
 
-static bool   gDialDrag   = false;
-static double gDialDragY  = 0.0;
-static double gDialAccum  = 0.0;
-static double gDialStartX = 0.0;
-static double gDialStartY = 0.0;
+static bool   gDialDrag      = false;
+static double gDialDragY     = 0.0;
+static double gDialAccum     = 0.0;
+static double gDialStartX    = 0.0;
+static double gDialStartY    = 0.0;
+static int    gDialSkipCount = 0;   // skip first N cursor_pos events after CURSOR_DISABLED — covers stale events + transition event
 
 void handle_mouse_button(void * win, int button, int action, int mods, double x, double y) {
     (void)mods;
@@ -77,17 +78,19 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     extern void glfwSetCursorPos(void *, double, double);
 
     if (pressed && dial_hit_test(coord)) {
-        gDialDrag   = true;
-        gDialDragY  = y;
-        gDialAccum  = 0.0;
-        gDialStartX = x;
-        gDialStartY = y;
+        gDialDrag      = true;
+        gDialDragY     = y;
+        gDialAccum     = 0.0;
+        gDialStartX    = x;
+        gDialStartY    = y;
+        gDialSkipCount = 3;
         glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         return;
     }
 
     if (!pressed && gDialDrag) {
-        gDialDrag = false;
+        gDialDrag      = false;
+        gDialSkipCount = 0;
         glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         glfwSetCursorPos(win, gDialStartX, gDialStartY);
         atomic_store(&gNeedLcdFull, true);
@@ -113,12 +116,18 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
 
 void handle_cursor_pos(void * win, double x, double y) {
     (void)win;
-    (void)x;
 
     if (!gDialDrag) {
         return;
     }
+
+    if (gDialSkipCount > 0) {
+        gDialDragY = y;
+        gDialSkipCount--;
+        return;
+    }
     // Drag up = positive delta (increment), 2 window pixels per step
+    (void)x;
     gDialAccum += (gDialDragY - y) * 0.5;
     gDialDragY  = y;
 
