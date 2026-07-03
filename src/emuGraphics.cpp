@@ -154,8 +154,9 @@ void dial_nudge(int delta) {
 
     if (gSessionOpen) {
         peptalk_send_rotary_event(delta);
-        // No LCD request here — caller triggers a full dump on drag end
-        // to avoid delta-base misalignment from rapid successive events
+        // No LCD request here — while a drag is active, the MIDI poll
+        // thread already polls for a delta on its own throttled cadence
+        // (see gDialDragActive), independent of individual ticks.
     }
     gReDraw    = true;
 }

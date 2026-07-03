@@ -46,9 +46,19 @@ extern _Atomic uint8_t  gSessionSeqId;
 
 // ── LCD ──────────────────────────────────────────────────────────────────────
 extern tLcdBuffer       gLcd;
-extern _Atomic bool     gNeedLcdFull;     // request full LCD dump next poll
-extern _Atomic bool     gNeedLcdDelta;    // request delta LCD dump next poll
-extern _Atomic bool     gLcdPending;      // an LCD request is in-flight; don't send another
+extern _Atomic bool     gNeedLcdFull;         // request full LCD dump next poll
+extern _Atomic bool     gNeedLcdDelta;        // request delta LCD dump next poll
+extern _Atomic bool     gLcdPending;          // an LCD request is in-flight; don't send another
+
+// Throttled LCD refresh while a dial drag is held: gDialDragActive is true
+// for the whole press-to-release span, and the MIDI poll thread requests one
+// delta dump every DIAL_LCD_POLL_INTERVAL_MS while it's set — regardless of
+// whether new encoder ticks are currently being sent — so the screen keeps
+// refreshing during a long continuous drag and during a held-but-paused
+// drag alike, without requesting faster than the throttle interval. Never
+// causes a new value to be sent — that stays solely driven by dial_nudge().
+extern _Atomic bool     gDialDragActive;
+extern _Atomic double   gLastLcdPollMs;
 
 // ── LEDs ─────────────────────────────────────────────────────────────────────
 extern _Atomic uint32_t gLeds;            // bitmask of lit LEDs

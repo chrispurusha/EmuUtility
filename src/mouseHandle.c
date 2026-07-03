@@ -98,15 +98,16 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     // routing below (context menu, buttons) — the drag consumes the release
     // regardless of what's now under the cursor. Matches G2-Edit/mouseHandle.c.
     if (!pressed && gDialDrag) {
-        gDialDrag      = false;
-        gDialSkipCount = 0;
+        gDialDrag       = false;
+        gDialSkipCount  = 0;
 
         if (gDialMode != eDialModeRotary) {
             glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
             glfwSetCursorPos(win, gDialStartX, gDialStartY);
         }
-        gNeedLcdFull   = true;
-        gReDraw        = true;
+        gDialDragActive = false;
+        gNeedLcdFull    = true; // final full sync supersedes the throttled polling done during the drag
+        gReDraw         = true;
         return;
     }
 
@@ -119,12 +120,14 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     }
 
     if (pressed && dial_hit_test(coord)) {
-        gDialDrag   = true;
-        gDialAccum  = 0.0;
-        gDialStartX = x;
-        gDialStartY = y;
-        gDialPrevX  = x;
-        gDialPrevY  = y;
+        gDialDrag       = true;
+        gDialAccum      = 0.0;
+        gDialStartX     = x;
+        gDialStartY     = y;
+        gDialPrevX      = x;
+        gDialPrevY      = y;
+        gDialDragActive = true;
+        gLastLcdPollMs  = get_time_ms(); // first poll can fire as soon as the interval elapses
 
         if (gDialMode == eDialModeRotary) {
             gDialPrevAngle = calculate_mouse_angle(coord, emu_dial_rect());

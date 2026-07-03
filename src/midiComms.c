@@ -22,10 +22,13 @@
 #include "synthlibDefs.h"
 #include "types.h"
 #include "globalVars.h"
+#include "utils.h"
 #include "peptalk.h"
 #include "midiComms.h"
 
-static void            (*gWakeCb)(void) = NULL;
+#define DIAL_LCD_POLL_INTERVAL_MS    120.0 // how often to poll for an LCD delta while a dial drag is held
+
+static void (*gWakeCb)(void) = NULL;
 static pthread_t       gMidiThread = 0;
 static pthread_mutex_t gSendMutex  = PTHREAD_MUTEX_INITIALIZER;
 
@@ -322,6 +325,18 @@ static void * midi_thread(void * arg) {
     while (!gQuitAll) {
         // Poll: if session open, request LCD/LED updates as needed
         if (gSessionOpen) {
+            // While a dial drag is held, poll for an LCD delta on a steady
+            // throttled cadence — independent of whether new encoder ticks
+            // are currently being sent. This covers both a long continuous
+            // drag (ticks never stop long enough to "go quiet") and a held
+            // but paused drag (no ticks at all) alike. Never sends a new
+            // encoder value itself — that's only ever driven by dial_nudge().
+            if (  gDialDragActive && !gLcdPending
+               && ((get_time_ms() - gLastLcdPollMs) >= DIAL_LCD_POLL_INTERVAL_MS)) {
+                gNeedLcdDelta  = true;
+                gLastLcdPollMs = get_time_ms();
+            }
+
             if (gNeedLeds) {
                 extern void peptalk_send_led_state_request(void);
                 peptalk_send_led_state_request();
@@ -346,7 +361,8 @@ static void * midi_thread(void * arg) {
         // Use a short interval when work is in progress, idle at ~30 Hz otherwise.
         bool   busy    = gLcdPending
                          || gNeedLcdFull
-                         || gNeedLcdDelta;
+                         || gNeedLcdDelta
+                         || gDialDragActive;
         double seconds = busy ? 0.005 : 0.033;
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);
     }
