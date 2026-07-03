@@ -331,12 +331,12 @@ static void * midi_thread(void * arg) {
                 // it before we have a chance to set it (race on USB round-trip).
                 if (gNeedLcdFull) {
                     extern void peptalk_send_lcd_dump_request(void);
-                    gLcdPending = true;
+                    gLcdPending  = true;
                     gNeedLcdFull = false;
                     peptalk_send_lcd_dump_request();
                 } else if (gNeedLcdDelta) {
                     extern void peptalk_send_lcd_delta_request(void);
-                    gLcdPending = true;
+                    gLcdPending   = true;
                     gNeedLcdDelta = false;
                     peptalk_send_lcd_delta_request();
                 }

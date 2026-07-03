@@ -54,4 +54,7 @@ extern _Atomic bool     gLcdPending;      // an LCD request is in-flight; don't 
 extern _Atomic uint32_t gLeds;            // bitmask of lit LEDs
 extern _Atomic bool     gNeedLeds;        // request LED state next poll
 
+// ── UI ───────────────────────────────────────────────────────────────────────
+extern tDialMode        gDialMode;
+
 #endif // __GLOBAL_VARS_H__

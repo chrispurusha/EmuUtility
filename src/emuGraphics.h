@@ -35,6 +35,7 @@ void render_lcd();
 void render_dial_knob(void);
 bool dial_hit_test(tCoord coord);
 void dial_nudge(int delta);   // +ve = clockwise / increment
+tRectangle emu_dial_rect(void);
 
 // Render the button panel below the LCD.
 void render_button_panel();

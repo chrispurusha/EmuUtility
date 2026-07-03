@@ -42,7 +42,7 @@ extern "C" {
 #include "misc.h"
 #include "graphics.h"
 
-/*static float           gContentScale   = 2.0f;*/
+static float gContentScale = 2.0f;
 
 static void setup_projection(GLFWwindow * win);
 
@@ -51,29 +51,29 @@ static void setup_projection(GLFWwindow * win);
 void framebuffer_size_callback(GLFWwindow * window, int width, int height) {
     // Update the OpenGL viewport to match the current framebuffer size
     glViewport(0, 0, width, height);
-    
-    set_render_width(width);  // Inform utilsGraphics
-    set_render_height(height);  // Inform utilsGraphics
-    gGlobalGuiScale = (double)width / (double)TARGET_FRAME_BUFF_WIDTH;
-    
+
+    set_render_width(width);   // Inform utilsGraphics
+    set_render_height(height); // Inform utilsGraphics
+    gGlobalGuiScale = (double)gContentScale * (double)width / (double)TARGET_FRAME_BUFF_WIDTH;
+
     // Configure a 2D orthographic projection in framebuffer pixels
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glOrtho(0, width, height, 0, -1, 1);
-    
+
     // Restore the model-view matrix ready for normal rendering
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    
+
     gReDraw         = true;
 }
 
 void window_size_callback(GLFWwindow * window, int width, int height) {
-    //save_window_size(width);  // TODO
+    save_window_size(width);
 }
 
 void window_pos_callback(GLFWwindow * window, int x, int y) {
-    //save_window_pos(x, y); // TODO
+    save_window_pos(x, y);
 }
 
 void resize_window(int w, int h) {
@@ -197,7 +197,7 @@ static int init_font(void) {
 // ── init_graphics ─────────────────────────────────────────────────────────────
 
 void init_graphics(void) {
-    char          title[128]        = {0};
+    char title[128] = {0};
 
     snprintf(title, sizeof(title), "%s - Build %s %s", WINDOW_TITLE, __DATE__, __TIME__);
 
@@ -212,36 +212,41 @@ void init_graphics(void) {
 
     glfwWindowHint(GLFW_COCOA_RETINA_FRAMEBUFFER, GLFW_TRUE);
     glfwWindowHint(GLFW_COCOA_GRAPHICS_SWITCHING, GLFW_TRUE);  // Needed for Intel systems with discrete graphics
-    gWindow       = (void *)glfwCreateWindow(TARGET_FRAME_BUFF_WIDTH/4, TARGET_FRAME_BUFF_HEIGHT/4, title, NULL, NULL);
+    gWindow = (void *)glfwCreateWindow(TARGET_FRAME_BUFF_WIDTH / 4, TARGET_FRAME_BUFF_HEIGHT / 4, title, NULL, NULL);
 
     if (!gWindow) {
         glfwTerminate();
         exit(EXIT_FAILURE);
     }
-    glfwSetWindowSizeLimits((GLFWwindow *)gWindow, TARGET_FRAME_BUFF_WIDTH/8, TARGET_FRAME_BUFF_HEIGHT/8, GLFW_DONT_CARE, GLFW_DONT_CARE);
+    glfwSetWindowSizeLimits((GLFWwindow *)gWindow, TARGET_FRAME_BUFF_WIDTH / 8, TARGET_FRAME_BUFF_HEIGHT / 8, GLFW_DONT_CARE, GLFW_DONT_CARE);
     glfwSetWindowAspectRatio((GLFWwindow *)gWindow, TARGET_FRAME_BUFF_WIDTH, TARGET_FRAME_BUFF_HEIGHT);
 
     glfwMakeContextCurrent((GLFWwindow *)gWindow);
-    
-	framebuffer_size_callback((GLFWwindow *)gWindow, TARGET_FRAME_BUFF_WIDTH, TARGET_FRAME_BUFF_HEIGHT);
-	
+
+    {
+        int fbWidth  = 0;
+        int fbHeight = 0;
+        glfwGetFramebufferSize((GLFWwindow *)gWindow, &fbWidth, &fbHeight);
+        framebuffer_size_callback((GLFWwindow *)gWindow, fbWidth, fbHeight);
+    }
+
     glfwSetFramebufferSizeCallback((GLFWwindow *)gWindow, framebuffer_size_callback);
     glfwSetWindowSizeCallback((GLFWwindow *)gWindow, window_size_callback);
     glfwSetWindowPosCallback((GLFWwindow *)gWindow, window_pos_callback);
     glfwSwapInterval(1);
     glfwSetWindowCloseCallback((GLFWwindow *)gWindow, window_close_callback);
-    //glfwSetKeyCallback((GLFWwindow *)gWindow, key_callback);
-    //glfwSetCharCallback((GLFWwindow *)gWindow, char_event);
+    glfwSetKeyCallback((GLFWwindow *)gWindow, key_cb);
     glfwSetCursorPosCallback((GLFWwindow *)gWindow, cursor_pos_cb);
     glfwSetMouseButtonCallback((GLFWwindow *)gWindow, mouse_button_cb);
-    //glfwSetScrollCallback((GLFWwindow *)gWindow, scroll_event);
+    glfwSetScrollCallback((GLFWwindow *)gWindow, scroll_cb);
+    glfwSetWindowRefreshCallback((GLFWwindow *)gWindow, window_refresh_cb);
 
-	glEnable(GL_BLEND);  // TODO - Assess if G2 edit could benefit from this 
+    glEnable(GL_BLEND); // TODO - Assess if G2 edit could benefit from this
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    init_font(); // TODO - G2 edit could benefit from this if we're loading multiple fonts
+    init_font();        // TODO - G2 edit could benefit from this if we're loading multiple fonts
     init_lcd_texture();
-	
-	register_midi_wake_cb(wake_glfw); // TODO - this doesn't belong in here
+
+    register_midi_wake_cb(wake_glfw);     // TODO - this doesn't belong in here
 }
 // ── Render frame ──────────────────────────────────────────────────────────────
 

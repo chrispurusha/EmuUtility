@@ -37,6 +37,7 @@ extern "C" {
 #include "peptalk.h"
 #include "menus.h"
 #include "utils.h"
+#include "utilsGraphics.h"
 #include "mouseHandle.h"
 
 // Convert GLFW window-space (x,y) to logical canvas coordinates.
@@ -44,17 +45,27 @@ static tCoord window_to_logical(void * win, double x, double y) {
     int    winW  = 0;
     int    winH  = 0;
 
-    // glfwGetWindowSize signature matches: (GLFWwindow*, int*, int*)
-    // Cast via void* to avoid pulling GLFW header into this C file.
-    typedef void (*GetWinSizeFn)(void *, int *, int *);
-    //extern void glfwGetWindowSize(void *, int *, int *);
     glfwGetWindowSize(win, &winW, &winH);
 
     tCoord coord = {
-        .x = x,
-        .y = y,
+        .x = (winW > 0) ? (x / winW) * (get_render_width() / gGlobalGuiScale) : x,
+        .y = (winH > 0) ? (y / winH) * (get_render_height() / gGlobalGuiScale) : y,
     };
     return coord;
+}
+
+// Scale a window-space delta to logical-space delta
+static double delta_to_logical(void * win, double winDelta, bool isX) {
+    int winW = 0;
+    int winH = 0;
+
+    glfwGetWindowSize(win, &winW, &winH);
+
+    if (isX) {
+        return (winW > 0) ? (winDelta / winW) * (get_render_width() / gGlobalGuiScale) : winDelta;
+    } else {
+        return (winH > 0) ? (winDelta / winH) * (get_render_height() / gGlobalGuiScale) : winDelta;
+    }
 }
 
 #define GLFW_CURSOR             0x00033001
@@ -62,10 +73,12 @@ static tCoord window_to_logical(void * win, double x, double y) {
 #define GLFW_CURSOR_DISABLED    0x00034003
 
 static bool   gDialDrag      = false;
-static double gDialDragY     = 0.0;
+static double gDialPrevX     = 0.0; // previous cursor x — used for horizontal delta
+static double gDialPrevY     = 0.0; // previous cursor y — used for vertical delta
 static double gDialAccum     = 0.0;
-static double gDialStartX    = 0.0;
+static double gDialStartX    = 0.0; // cursor position at press — used for restore on release
 static double gDialStartY    = 0.0;
+static double gDialPrevAngle = 0.0; // last mouse angle around dial centre — used for rotary mode
 static int    gDialSkipCount = 0;   // skip first N cursor_pos events after CURSOR_DISABLED — covers stale events + transition event
 
 void handle_mouse_button(void * win, int button, int action, int mods, double x, double y) {
@@ -75,12 +88,27 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
         return;
     }
     tCoord coord   = window_to_logical(win, x, y);
-    //get_global_gui_scaled_mouse_coord(&coord);
-    
+
     bool   pressed = (action == 1);      // GLFW_PRESS == 1
 
     LOG_DEBUG("mouse %s win(%.0f,%.0f) logical(%.0f,%.0f)\n",
               pressed ? "press" : "release", x, y, coord.x, coord.y);
+
+    // A release that ends an active dial drag takes priority over other click
+    // routing below (context menu, buttons) — the drag consumes the release
+    // regardless of what's now under the cursor. Matches G2-Edit/mouseHandle.c.
+    if (!pressed && gDialDrag) {
+        gDialDrag      = false;
+        gDialSkipCount = 0;
+
+        if (gDialMode != eDialModeRotary) {
+            glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            glfwSetCursorPos(win, gDialStartX, gDialStartY);
+        }
+        gNeedLcdFull   = true;
+        gReDraw        = true;
+        return;
+    }
 
     if (close_context_menu_if_outside(coord)) {
         return;
@@ -89,63 +117,75 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     if (handle_context_menu_click(coord)) {
         return;
     }
-    //extern void glfwSetInputMode(void *, int, int);
-    //extern void glfwSetCursorPos(void *, double, double);
 
     if (pressed && dial_hit_test(coord)) {
-        gDialDrag      = true;
-        gDialDragY     = y;
-        gDialAccum     = 0.0;
-        gDialStartX    = x;
-        gDialStartY    = y;
-        gDialSkipCount = 3;
-        glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        return;
-    }
+        gDialDrag   = true;
+        gDialAccum  = 0.0;
+        gDialStartX = x;
+        gDialStartY = y;
+        gDialPrevX  = x;
+        gDialPrevY  = y;
 
-    if (!pressed && gDialDrag) {
-        gDialDrag      = false;
-        gDialSkipCount = 0;
-        glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-        glfwSetCursorPos(win, gDialStartX, gDialStartY);
-        gNeedLcdFull = true;
-        gReDraw = true;
+        if (gDialMode == eDialModeRotary) {
+            gDialPrevAngle = calculate_mouse_angle(coord, emu_dial_rect());
+        } else {
+            gDialSkipCount = 3;
+            glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        }
         return;
     }
     tButton * btn = button_at(coord);
 
     if (btn != NULL) {
         LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
-        btn->pressed = pressed;
+        btn->pressed  = pressed;
         peptalk_send_button_event(btn->key, pressed);
         // Always request a full dump after any button press. Deltas are only
         // safe when we know the hardware's base state hasn't drifted — button
         // presses can change the display in ways that compound delta errors.
-        gNeedLcdFull = true;
+        gNeedLcdFull  = true;
         gNeedLcdDelta = false;
-        gReDraw = true;
+        gReDraw       = true;
     } else {
         LOG_DEBUG("no button at logical(%.0f,%.0f)\n", coord.x, coord.y);
     }
 }
 
 void handle_cursor_pos(void * win, double x, double y) {
-    (void)win;
-
     if (!gDialDrag) {
         return;
     }
 
-    if (gDialSkipCount > 0) {
-        gDialDragY = y;
-        gDialSkipCount--;
-        return;
-    }
-    // Drag up = positive delta (increment), 2 window pixels per step
-    (void)x;
-    gDialAccum += (gDialDragY - y) * 0.5;
-    gDialDragY  = y;
+    if (gDialMode == eDialModeRotary) {
+        tCoord coord = window_to_logical(win, x, y);
+        double angle = calculate_mouse_angle(coord, emu_dial_rect());
+        double delta = angle - gDialPrevAngle;
 
+        // Shortest signed rotation, handling the 0°/360° wrap
+        if (delta > 180.0) {
+            delta -= 360.0;
+        } else if (delta < -180.0) {
+            delta += 360.0;
+        }
+        gDialPrevAngle = angle;
+        gDialAccum    += delta / 6.0;   // ~6 degrees of rotation per encoder step
+    } else {
+        if (gDialSkipCount > 0) {
+            gDialPrevX = x;
+            gDialPrevY = y;
+            gDialSkipCount--;
+            return;
+        }
+
+        if (gDialMode == eDialModeHorizontal) {
+            gDialAccum += delta_to_logical(win, x - gDialPrevX, true) * 0.25;
+            gDialPrevX  = x;
+        } else {
+            // Drag up = positive delta (increment)
+            gDialAccum += delta_to_logical(win, gDialPrevY - y, false) * 0.25;
+            gDialPrevY  = y;
+        }
+    }
     int steps = (int)gDialAccum;
 
     if (steps != 0) {
@@ -206,9 +246,9 @@ void handle_key(void * win, int key, int scancode, int action, int mods) {
     if (found) {
         peptalk_send_button_event(bk, true);
         peptalk_send_button_event(bk, false);
-        gNeedLcdFull = true;
+        gNeedLcdFull  = true;
         gNeedLcdDelta = false;
-        gReDraw = true;
+        gReDraw       = true;
     }
 }
 
@@ -222,7 +262,7 @@ void handle_scroll(void * win, double dx, double dy) {
     int delta = (int)(dy * 3.0);
     peptalk_send_rotary_event(delta);
     gNeedLcdDelta = true;
-    gReDraw = true;
+    gReDraw       = true;
 }
 
 #ifdef __cplusplus

@@ -51,7 +51,7 @@ static uint32_t gDialValue   = 0;
 
 void init_lcd_texture(void) {
     // TODO - move into utilsGraphics
-     
+
     glGenTextures(1, &gLcdTexture);
     glBindTexture(GL_TEXTURE_2D, gLcdTexture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -82,7 +82,7 @@ static void update_lcd_texture(void) {
         }
     }
 
-     // TODO - move into utilsGraphics, possibly with the above too
+    // TODO - move into utilsGraphics, possibly with the above too
     glBindTexture(GL_TEXTURE_2D, gLcdTexture);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, LCD_WIDTH, LCD_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -110,12 +110,11 @@ void render_lcd() {
     if (!gSessionOpen) {
         return;
     }
-
     render_rectangle(mainArea, (tRectangle){{x - LCD_BORDER, y - LCD_BORDER},
                                             {w + LCD_BORDER * 2.0, h + LCD_BORDER * 2.0}});
-    
+
     render_texture(mainArea, (tRectangle){{x, y},
-                                            {w, h}}, gLcdTexture);
+                                          {w, h}}, gLcdTexture);
 }
 
 void render_dial_knob(void) {
@@ -136,13 +135,14 @@ void render_dial_knob(void) {
     render_radial_line(mainArea, centre, DIAL_RADIUS * 0.75, angle, 5.0);
 }
 
+tRectangle emu_dial_rect(void) {
+    return (tRectangle){{
+                            DIAL_CX - DIAL_RADIUS, DIAL_CY - DIAL_RADIUS
+                        }, {DIAL_RADIUS * 2.0, DIAL_RADIUS * 2.0}};
+}
+
 bool dial_hit_test(tCoord coord) {
-    // TODO - Call within_rectangle and deal with scaling
-    if (coord.x >= (DIAL_CX-DIAL_RADIUS) && coord.x <= (DIAL_CX+DIAL_RADIUS) && coord.y >= (DIAL_CY-DIAL_RADIUS) && coord.y <= (DIAL_CY+DIAL_RADIUS)) {
-        return true;
-    }
-    
-    return false;
+    return within_rectangle(coord, emu_dial_rect());
 }
 
 void dial_nudge(int delta) {
@@ -155,7 +155,7 @@ void dial_nudge(int delta) {
         // No LCD request here — caller triggers a full dump on drag end
         // to avoid delta-base misalignment from rapid successive events
     }
-    gReDraw = true;
+    gReDraw    = true;
 }
 
 // ── Button layout ─────────────────────────────────────────────────────────────

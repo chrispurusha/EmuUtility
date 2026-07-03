@@ -202,8 +202,8 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
             LOG_DEBUG("PEPTALK session status\n");
             gSessionOpen = true;
             gNeedLcdFull = true;
-            gNeedLeds = true;
-            gReDraw = true;
+            gNeedLeds    = true;
+            gReDraw      = true;
             break;
         }
 
@@ -261,9 +261,9 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
         {
             if (payloadLen >= 2) {
                 uint32_t leds = (uint32_t)(payload[1] << 7) | payload[0];
-                gLeds = ~leds;
+                gLeds     = ~leds;
                 gNeedLeds = false;
-                gReDraw = true;
+                gReDraw   = true;
             }
             break;
         }
@@ -271,16 +271,16 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
         case PEPTALK_BUTTON_EVENT:
         {
             // Always request a full dump on any button echo; see mouseHandle.c.
-            gNeedLcdFull = true;
+            gNeedLcdFull  = true;
             gNeedLcdDelta = false;
-            gReDraw = true;
+            gReDraw       = true;
             break;
         }
 
         case PEPTALK_ROTARY_EVENT:
         {
             gNeedLcdDelta = true;
-            gReDraw = true;
+            gReDraw       = true;
             break;
         }
 
