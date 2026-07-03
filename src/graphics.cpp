@@ -230,8 +230,8 @@ void init_graphics(void) {
     glfwSetWindowCloseCallback((GLFWwindow *)gWindow, window_close_callback);
     //glfwSetKeyCallback((GLFWwindow *)gWindow, key_callback);
     //glfwSetCharCallback((GLFWwindow *)gWindow, char_event);
-    //glfwSetCursorPosCallback((GLFWwindow *)gWindow, cursor_pos);
-    //glfwSetMouseButtonCallback((GLFWwindow *)gWindow, mouse_button);
+    glfwSetCursorPosCallback((GLFWwindow *)gWindow, cursor_pos_cb);
+    glfwSetMouseButtonCallback((GLFWwindow *)gWindow, mouse_button_cb);
     //glfwSetScrollCallback((GLFWwindow *)gWindow, scroll_event);
 
 	glEnable(GL_BLEND);  // TODO - Assess if G2 edit could benefit from this 

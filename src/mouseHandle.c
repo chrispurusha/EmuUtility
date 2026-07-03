@@ -17,6 +17,18 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Disable warnings from external library headers etc.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
+
+#define GL_SILENCE_DEPRECATION    1
+#include <GLFW/glfw3.h>
+
+#pragma clang diagnostic pop
 #include "defs.h"
 #include "synthlibDefs.h"
 #include "types.h"
@@ -35,12 +47,12 @@ static tCoord window_to_logical(void * win, double x, double y) {
     // glfwGetWindowSize signature matches: (GLFWwindow*, int*, int*)
     // Cast via void* to avoid pulling GLFW header into this C file.
     typedef void (*GetWinSizeFn)(void *, int *, int *);
-    extern void glfwGetWindowSize(void *, int *, int *);
+    //extern void glfwGetWindowSize(void *, int *, int *);
     glfwGetWindowSize(win, &winW, &winH);
 
     tCoord coord = {
-        .x = x * gGlobalGuiScale,
-        .y = y * gGlobalGuiScale,
+        .x = x,
+        .y = y,
     };
     return coord;
 }
@@ -63,6 +75,8 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
         return;
     }
     tCoord coord   = window_to_logical(win, x, y);
+    //get_global_gui_scaled_mouse_coord(&coord);
+    
     bool   pressed = (action == 1);      // GLFW_PRESS == 1
 
     LOG_DEBUG("mouse %s win(%.0f,%.0f) logical(%.0f,%.0f)\n",
@@ -75,8 +89,8 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     if (handle_context_menu_click(coord)) {
         return;
     }
-    extern void glfwSetInputMode(void *, int, int);
-    extern void glfwSetCursorPos(void *, double, double);
+    //extern void glfwSetInputMode(void *, int, int);
+    //extern void glfwSetCursorPos(void *, double, double);
 
     if (pressed && dial_hit_test(coord)) {
         gDialDrag      = true;
@@ -210,3 +224,7 @@ void handle_scroll(void * win, double dx, double dy) {
     gNeedLcdDelta = true;
     gReDraw = true;
 }
+
+#ifdef __cplusplus
+}
+#endif

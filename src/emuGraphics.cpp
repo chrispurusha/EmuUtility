@@ -137,10 +137,12 @@ void render_dial_knob(void) {
 }
 
 bool dial_hit_test(tCoord coord) {
-    double dx = coord.x - DIAL_CX;
-    double dy = coord.y - DIAL_CY;
-
-    return (dx * dx + dy * dy) <= (DIAL_RADIUS * DIAL_RADIUS);
+    // TODO - Call within_rectangle and deal with scaling
+    if (coord.x >= (DIAL_CX-DIAL_RADIUS) && coord.x <= (DIAL_CX+DIAL_RADIUS) && coord.y >= (DIAL_CY-DIAL_RADIUS) && coord.y <= (DIAL_CY+DIAL_RADIUS)) {
+        return true;
+    }
+    
+    return false;
 }
 
 void dial_nudge(int delta) {
