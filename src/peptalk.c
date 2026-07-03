@@ -200,10 +200,10 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
         case PEPTALK_SESSION_STATUS:
         {
             LOG_DEBUG("PEPTALK session status\n");
-            atomic_store(&gSessionOpen, true);
-            atomic_store(&gNeedLcdFull, true);
-            atomic_store(&gNeedLeds, true);
-            atomic_store(&gReDraw, true);
+            gSessionOpen = true;
+            gNeedLcdFull = true;
+            gNeedLeds = true;
+            gReDraw = true;
             break;
         }
 
@@ -219,18 +219,18 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
             LOG_DEBUG("peptalk LCD 0x50 unpacked=%u (full=%u)\n", (unsigned)unpacked, (unsigned)LCD_BYTES);
 
-            atomic_store(&gLcdPending, false);
+            gLcdPending = false;
 
             if (unpacked >= LCD_BYTES) {
                 // Full frame — replace pixels entirely
                 memcpy(gLcd.pixels, tmp, LCD_BYTES);
                 gLcd.refresh++;
-                atomic_store(&gReDraw, true);
+                gReDraw = true;
             } else if (unpacked > 0) {
                 // Partial payload in same message type — treat as delta
                 peptalk_apply_lcd_delta(tmp, unpacked);
                 gLcd.refresh++;
-                atomic_store(&gReDraw, true);
+                gReDraw = true;
             }
             break;
         }
@@ -239,7 +239,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
         {
             LOG_DEBUG("peptalk LCD 0x53 payloadLen=%u\n", (unsigned)payloadLen);
 
-            atomic_store(&gLcdPending, false);
+            gLcdPending = false;
 
             if (payloadLen < 10) {
                 break;
@@ -252,7 +252,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
             if (unpacked > 0) {
                 peptalk_apply_lcd_delta(tmp, unpacked);
                 gLcd.refresh++;
-                atomic_store(&gReDraw, true);
+                gReDraw = true;
             }
             break;
         }
@@ -261,9 +261,9 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
         {
             if (payloadLen >= 2) {
                 uint32_t leds = (uint32_t)(payload[1] << 7) | payload[0];
-                atomic_store(&gLeds, ~leds);
-                atomic_store(&gNeedLeds, false);
-                atomic_store(&gReDraw, true);
+                gLeds = ~leds;
+                gNeedLeds = false;
+                gReDraw = true;
             }
             break;
         }
@@ -271,16 +271,16 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
         case PEPTALK_BUTTON_EVENT:
         {
             // Always request a full dump on any button echo; see mouseHandle.c.
-            atomic_store(&gNeedLcdFull, true);
-            atomic_store(&gNeedLcdDelta, false);
-            atomic_store(&gReDraw, true);
+            gNeedLcdFull = true;
+            gNeedLcdDelta = false;
+            gReDraw = true;
             break;
         }
 
         case PEPTALK_ROTARY_EVENT:
         {
-            atomic_store(&gNeedLcdDelta, true);
-            atomic_store(&gReDraw, true);
+            gNeedLcdDelta = true;
+            gReDraw = true;
             break;
         }
 

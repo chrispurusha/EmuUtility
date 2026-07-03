@@ -122,7 +122,7 @@ static void midi_notify_cb(const MIDINotification * msg, void * refCon) {
     if (msg->messageID == kMIDIMsgSetupChanged) {
         LOG_DEBUG("CoreMIDI setup changed\n");
         midi_scan_devices();
-        atomic_store(&gReDraw, true);
+        gReDraw = true;
 
         if (gWakeCb != NULL) {
             gWakeCb();
@@ -319,34 +319,34 @@ static void * midi_thread(void * arg) {
     }
     midi_scan_devices();
 
-    while (!atomic_load(&gQuitAll)) {
+    while (!gQuitAll) {
         // Poll: if session open, request LCD/LED updates as needed
-        if (atomic_load(&gSessionOpen)) {
-            if (atomic_load(&gNeedLeds)) {
+        if (gSessionOpen) {
+            if (gNeedLeds) {
                 extern void peptalk_send_led_state_request(void);
                 peptalk_send_led_state_request();
-                atomic_store(&gNeedLeds, false);
-            } else if (!atomic_load(&gLcdPending)) {
+                gNeedLeds = false;
+            } else if (!gLcdPending) {
                 // Set the flag *before* sending so a fast response cannot clear
                 // it before we have a chance to set it (race on USB round-trip).
-                if (atomic_load(&gNeedLcdFull)) {
+                if (gNeedLcdFull) {
                     extern void peptalk_send_lcd_dump_request(void);
-                    atomic_store(&gLcdPending, true);
-                    atomic_store(&gNeedLcdFull, false);
+                    gLcdPending = true;
+                    gNeedLcdFull = false;
                     peptalk_send_lcd_dump_request();
-                } else if (atomic_load(&gNeedLcdDelta)) {
+                } else if (gNeedLcdDelta) {
                     extern void peptalk_send_lcd_delta_request(void);
-                    atomic_store(&gLcdPending, true);
-                    atomic_store(&gNeedLcdDelta, false);
+                    gLcdPending = true;
+                    gNeedLcdDelta = false;
                     peptalk_send_lcd_delta_request();
                 }
             }
         }
         // Drive this thread's CFRunLoop so the midi_notify_cb fires here.
         // Use a short interval when work is in progress, idle at ~30 Hz otherwise.
-        bool   busy    = atomic_load(&gLcdPending)
-                         || atomic_load(&gNeedLcdFull)
-                         || atomic_load(&gNeedLcdDelta);
+        bool   busy    = gLcdPending
+                         || gNeedLcdFull
+                         || gNeedLcdDelta;
         double seconds = busy ? 0.005 : 0.033;
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);
     }

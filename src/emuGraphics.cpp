@@ -104,7 +104,7 @@ void render_lcd(tRectangle area) {
     render_rectangle(mainArea, (tRectangle){{x - LCD_BORDER, y - LCD_BORDER},
                                             {w + LCD_BORDER * 2.0, h + LCD_BORDER * 2.0}});
 
-    if (!atomic_load(&gSessionOpen)) {
+    if (!gSessionOpen) {
         return;
     }
     glEnable(GL_TEXTURE_2D);
@@ -156,12 +156,12 @@ void dial_nudge(int delta) {
 
     gDialValue = (uint32_t)next;
 
-    if (atomic_load(&gSessionOpen)) {
+    if (gSessionOpen) {
         peptalk_send_rotary_event(delta);
         // No LCD request here — caller triggers a full dump on drag end
         // to avoid delta-base misalignment from rapid successive events
     }
-    atomic_store(&gReDraw, true);
+    gReDraw = true;
 }
 
 // ── Button layout ─────────────────────────────────────────────────────────────
@@ -269,7 +269,7 @@ static void render_button_at(tButtonKey key, double x, double y, double w, doubl
                                       x, y
                                   }, {w, h}};
 
-    uint32_t  leds  = atomic_load(&gLeds);
+    uint32_t  leds  = gLeds;
     bool      ledOn = btn->hasLed && (leds & (1u << btn->ledIndex));
     tRgb      col   = btn->pressed ? (tRgb)RGB_AMBER : ledOn ? (tRgb)RGB_GREEN_ON : (tRgb)RGB_GREY_3;
 

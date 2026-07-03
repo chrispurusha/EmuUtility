@@ -94,8 +94,8 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
         gDialSkipCount = 0;
         glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         glfwSetCursorPos(win, gDialStartX, gDialStartY);
-        atomic_store(&gNeedLcdFull, true);
-        atomic_store(&gReDraw, true);
+        gNeedLcdFull = true;
+        gReDraw = true;
         return;
     }
     tButton * btn = button_at(coord);
@@ -107,9 +107,9 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
         // Always request a full dump after any button press. Deltas are only
         // safe when we know the hardware's base state hasn't drifted — button
         // presses can change the display in ways that compound delta errors.
-        atomic_store(&gNeedLcdFull, true);
-        atomic_store(&gNeedLcdDelta, false);
-        atomic_store(&gReDraw, true);
+        gNeedLcdFull = true;
+        gNeedLcdDelta = false;
+        gReDraw = true;
     } else {
         LOG_DEBUG("no button at logical(%.0f,%.0f)\n", coord.x, coord.y);
     }
@@ -192,9 +192,9 @@ void handle_key(void * win, int key, int scancode, int action, int mods) {
     if (found) {
         peptalk_send_button_event(bk, true);
         peptalk_send_button_event(bk, false);
-        atomic_store(&gNeedLcdFull, true);
-        atomic_store(&gNeedLcdDelta, false);
-        atomic_store(&gReDraw, true);
+        gNeedLcdFull = true;
+        gNeedLcdDelta = false;
+        gReDraw = true;
     }
 }
 
@@ -207,6 +207,6 @@ void handle_scroll(void * win, double dx, double dy) {
     }
     int delta = (int)(dy * 3.0);
     peptalk_send_rotary_event(delta);
-    atomic_store(&gNeedLcdDelta, true);
-    atomic_store(&gReDraw, true);
+    gNeedLcdDelta = true;
+    gReDraw = true;
 }
