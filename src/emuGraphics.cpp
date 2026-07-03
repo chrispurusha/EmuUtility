@@ -160,25 +160,22 @@ void dial_nudge(int delta) {
     gReDraw    = true;
 }
 
-void dial_track_angle(double angleDegrees) {
-    // Inverse of render_dial_knob()'s angle = 270 + (value/range)*360
-    double   normalized = fmod(angleDegrees - 270.0, 360.0);
+static double gDialAngleAccum = 0.0; // fractional degrees of rotation not yet turned into a step
 
-    if (normalized < 0.0) {
-        normalized += 360.0;
-    }
-    uint32_t target     = (uint32_t)(normalized * (double)DIAL_RANGE / 360.0) % DIAL_RANGE;
-    int      delta      = (int)target - (int)gDialValue;
+void dial_nudge_by_angle(double deltaDegrees) {
+    // Rotate at the same angular rate as the mouse (1° of mouse rotation ==
+    // 1° of visual dial rotation), without pinning the indicator to the raw
+    // mouse angle — matches how a real endless encoder is driven, rather than
+    // a bounded pot that snaps to wherever you click.
+    double degreesPerStep = 360.0 / (double)DIAL_RANGE;
 
-    // Shortest signed path around the wrap
-    if (delta > (int)DIAL_RANGE / 2) {
-        delta -= (int)DIAL_RANGE;
-    } else if (delta < -(int)DIAL_RANGE / 2) {
-        delta += (int)DIAL_RANGE;
-    }
+    gDialAngleAccum += deltaDegrees;
 
-    if (delta != 0) {
-        dial_nudge(delta);
+    int    steps          = (int)(gDialAngleAccum / degreesPerStep);
+
+    if (steps != 0) {
+        gDialAngleAccum -= (double)steps * degreesPerStep;
+        dial_nudge(steps);
     }
 }
 

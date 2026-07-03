@@ -78,6 +78,7 @@ static double gDialPrevY     = 0.0; // previous cursor y — used for vertical d
 static double gDialAccum     = 0.0;
 static double gDialStartX    = 0.0; // cursor position at press — used for restore on release
 static double gDialStartY    = 0.0;
+static double gDialPrevAngle = 0.0; // previous mouse angle around dial centre — used for rotary mode
 static int    gDialSkipCount = 0;   // skip first N cursor_pos events after CURSOR_DISABLED — covers stale events + transition event
 
 void handle_mouse_button(void * win, int button, int action, int mods, double x, double y) {
@@ -125,7 +126,9 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
         gDialPrevX  = x;
         gDialPrevY  = y;
 
-        if (gDialMode != eDialModeRotary) {
+        if (gDialMode == eDialModeRotary) {
+            gDialPrevAngle = calculate_mouse_angle(coord, emu_dial_rect());
+        } else {
             gDialSkipCount = 3;
             glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         }
@@ -154,11 +157,22 @@ void handle_cursor_pos(void * win, double x, double y) {
     }
 
     if (gDialMode == eDialModeRotary) {
-        // Absolute tracking — the dial's indicator always points exactly at
-        // the mouse, like G2-Edit/Z1-Edit's rotary dials.
+        // Relative tracking — rotating the mouse around the dial centre turns
+        // the encoder at the same angular rate, without pinning the indicator
+        // to the raw mouse angle (there's no fixed "12 o'clock = value X" on a
+        // real endless encoder, so snapping to the click position would jump).
         tCoord coord = window_to_logical(win, x, y);
         double angle = calculate_mouse_angle(coord, emu_dial_rect());
-        dial_track_angle(angle);
+        double delta = angle - gDialPrevAngle;
+
+        // Shortest signed rotation, handling the 0°/360° wrap
+        if (delta > 180.0) {
+            delta -= 360.0;
+        } else if (delta < -180.0) {
+            delta += 360.0;
+        }
+        gDialPrevAngle = angle;
+        dial_nudge_by_angle(delta);
         return;
     }
 
