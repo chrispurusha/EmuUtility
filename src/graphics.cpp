@@ -42,7 +42,7 @@ extern "C" {
 #include "misc.h"
 #include "graphics.h"
 
-static float           gContentScale   = 2.0f;
+/*static float           gContentScale   = 2.0f;*/
 
 static void setup_projection(GLFWwindow * win);
 
@@ -54,7 +54,7 @@ void framebuffer_size_callback(GLFWwindow * window, int width, int height) {
     
     set_render_width(width);  // Inform utilsGraphics
     set_render_height(height);  // Inform utilsGraphics
-    gGlobalGuiScale = (double)gContentScale * (double)width / (double)TARGET_FRAME_BUFF_WIDTH;
+    gGlobalGuiScale = (double)width / (double)TARGET_FRAME_BUFF_WIDTH;
     
     // Configure a 2D orthographic projection in framebuffer pixels
     glMatrixMode(GL_PROJECTION);
@@ -223,6 +223,8 @@ void init_graphics(void) {
 
     glfwMakeContextCurrent((GLFWwindow *)gWindow);
     
+	framebuffer_size_callback((GLFWwindow *)gWindow, TARGET_FRAME_BUFF_WIDTH, TARGET_FRAME_BUFF_HEIGHT);
+	
     glfwSetFramebufferSizeCallback((GLFWwindow *)gWindow, framebuffer_size_callback);
     glfwSetWindowSizeCallback((GLFWwindow *)gWindow, window_size_callback);
     glfwSetWindowPosCallback((GLFWwindow *)gWindow, window_pos_callback);
@@ -249,18 +251,18 @@ static void render_frame(GLFWwindow * win) {
     glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
-    double     logW     = (double)get_render_width();
+    //double     logW     = /*(double)get_render_width() /*/ gGlobalGuiScale;
     //double     logH     = TARGET_FRAME_BUFF_HEIGHT;
 
     // LCD area: 2× the raw 240×64 pixel size, centred in left half of virtual space
-    double     lcdDispW = LCD_WIDTH * 2.0;
-    double     lcdDispH = LCD_HEIGHT * 2.0;
-    double     lcdX     = (logW / 2.0 - lcdDispW) / 2.0;
-    double     lcdY     = 10.0;
+    //double     lcdDispW = LCD_WIDTH * 2.0;
+    //double     lcdDispH = LCD_HEIGHT * 2.0;
+    //double     lcdX     = (logW  - lcdDispW);
+    //double     lcdY     = 10.0;
 
     //tRectangle mainArea = {{0.0, 0.0}, {logW, logH}};
-    tRectangle lcdArea  = {{lcdX, lcdY}, {lcdDispW, lcdDispH}};
-    tRectangle btnArea  = {{0.0, lcdY + lcdDispH + LCD_BORDER + 8.0}, {logW, button_panel_height(logW)}};
+    //tRectangle lcdArea  = {{lcdX, lcdY}, {lcdDispW, lcdDispH}};
+    //tRectangle btnArea  = {{0.0, lcdY + lcdDispH + LCD_BORDER + 8.0}, {logW, button_panel_height(logW)}};
 
     render_lcd();
     render_dial_knob();
