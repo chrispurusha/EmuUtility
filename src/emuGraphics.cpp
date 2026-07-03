@@ -27,6 +27,8 @@ extern "C" {
 #include <GLFW/glfw3.h>
 #pragma clang diagnostic pop
 
+#include <math.h>
+
 #include "defs.h"
 #include "synthlibDefs.h"
 #include "types.h"
@@ -156,6 +158,28 @@ void dial_nudge(int delta) {
         // to avoid delta-base misalignment from rapid successive events
     }
     gReDraw    = true;
+}
+
+void dial_track_angle(double angleDegrees) {
+    // Inverse of render_dial_knob()'s angle = 270 + (value/range)*360
+    double   normalized = fmod(angleDegrees - 270.0, 360.0);
+
+    if (normalized < 0.0) {
+        normalized += 360.0;
+    }
+    uint32_t target     = (uint32_t)(normalized * (double)DIAL_RANGE / 360.0) % DIAL_RANGE;
+    int      delta      = (int)target - (int)gDialValue;
+
+    // Shortest signed path around the wrap
+    if (delta > (int)DIAL_RANGE / 2) {
+        delta -= (int)DIAL_RANGE;
+    } else if (delta < -(int)DIAL_RANGE / 2) {
+        delta += (int)DIAL_RANGE;
+    }
+
+    if (delta != 0) {
+        dial_nudge(delta);
+    }
 }
 
 // ── Button layout ─────────────────────────────────────────────────────────────

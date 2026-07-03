@@ -78,7 +78,6 @@ static double gDialPrevY     = 0.0; // previous cursor y — used for vertical d
 static double gDialAccum     = 0.0;
 static double gDialStartX    = 0.0; // cursor position at press — used for restore on release
 static double gDialStartY    = 0.0;
-static double gDialPrevAngle = 0.0; // last mouse angle around dial centre — used for rotary mode
 static int    gDialSkipCount = 0;   // skip first N cursor_pos events after CURSOR_DISABLED — covers stale events + transition event
 
 void handle_mouse_button(void * win, int button, int action, int mods, double x, double y) {
@@ -126,9 +125,7 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
         gDialPrevX  = x;
         gDialPrevY  = y;
 
-        if (gDialMode == eDialModeRotary) {
-            gDialPrevAngle = calculate_mouse_angle(coord, emu_dial_rect());
-        } else {
+        if (gDialMode != eDialModeRotary) {
             gDialSkipCount = 3;
             glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         }
@@ -157,34 +154,28 @@ void handle_cursor_pos(void * win, double x, double y) {
     }
 
     if (gDialMode == eDialModeRotary) {
+        // Absolute tracking — the dial's indicator always points exactly at
+        // the mouse, like G2-Edit/Z1-Edit's rotary dials.
         tCoord coord = window_to_logical(win, x, y);
         double angle = calculate_mouse_angle(coord, emu_dial_rect());
-        double delta = angle - gDialPrevAngle;
+        dial_track_angle(angle);
+        return;
+    }
 
-        // Shortest signed rotation, handling the 0°/360° wrap
-        if (delta > 180.0) {
-            delta -= 360.0;
-        } else if (delta < -180.0) {
-            delta += 360.0;
-        }
-        gDialPrevAngle = angle;
-        gDialAccum    += delta / 6.0;   // ~6 degrees of rotation per encoder step
+    if (gDialSkipCount > 0) {
+        gDialPrevX = x;
+        gDialPrevY = y;
+        gDialSkipCount--;
+        return;
+    }
+
+    if (gDialMode == eDialModeHorizontal) {
+        gDialAccum += delta_to_logical(win, x - gDialPrevX, true) * 0.25;
+        gDialPrevX  = x;
     } else {
-        if (gDialSkipCount > 0) {
-            gDialPrevX = x;
-            gDialPrevY = y;
-            gDialSkipCount--;
-            return;
-        }
-
-        if (gDialMode == eDialModeHorizontal) {
-            gDialAccum += delta_to_logical(win, x - gDialPrevX, true) * 0.25;
-            gDialPrevX  = x;
-        } else {
-            // Drag up = positive delta (increment)
-            gDialAccum += delta_to_logical(win, gDialPrevY - y, false) * 0.25;
-            gDialPrevY  = y;
-        }
+        // Drag up = positive delta (increment)
+        gDialAccum += delta_to_logical(win, gDialPrevY - y, false) * 0.25;
+        gDialPrevY  = y;
     }
     int steps = (int)gDialAccum;
 

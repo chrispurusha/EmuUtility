@@ -37,6 +37,11 @@ bool dial_hit_test(tCoord coord);
 void dial_nudge(int delta);   // +ve = clockwise / increment
 tRectangle emu_dial_rect(void);
 
+// Rotary drag mode: snap the dial to track the given absolute angle (degrees,
+// 0° = 12 o'clock, clockwise — matches calculate_mouse_angle()'s convention),
+// wrapping continuously like a real endless encoder.
+void dial_track_angle(double angleDegrees);
+
 // Render the button panel below the LCD.
 void render_button_panel();
 
