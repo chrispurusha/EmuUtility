@@ -50,6 +50,8 @@ static uint32_t gDialValue   = 0;
 // ── LCD texture ───────────────────────────────────────────────────────────────
 
 void init_lcd_texture(void) {
+    // TODO - move into utilsGraphics
+     
     glGenTextures(1, &gLcdTexture);
     glBindTexture(GL_TEXTURE_2D, gLcdTexture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -80,13 +82,14 @@ static void update_lcd_texture(void) {
         }
     }
 
+     // TODO - move into utilsGraphics, possibly with the above too
     glBindTexture(GL_TEXTURE_2D, gLcdTexture);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, LCD_WIDTH, LCD_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
     glBindTexture(GL_TEXTURE_2D, 0);
     gLastRefresh = gLcd.refresh;
 }
 
-void render_lcd(tRectangle area) {
+void render_lcd() {
     if (gLcdTexture == 0) {
         return;
     }
@@ -94,10 +97,10 @@ void render_lcd(tRectangle area) {
     if (gLcd.refresh != gLastRefresh) {
         update_lcd_texture();
     }
-    double x = area.coord.x;
-    double y = area.coord.y;
-    double w = area.size.w;
-    double h = area.size.h;
+    double x = 200;
+    double y = 20;
+    double w = 500;
+    double h = 120;
 
     // Green border around the display area
     set_rgb_colour((tRgb)RGB_LCD_BG);
@@ -107,23 +110,12 @@ void render_lcd(tRectangle area) {
     if (!gSessionOpen) {
         return;
     }
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, gLcdTexture);
-    glColor3f(1.0f, 1.0f, 1.0f);
 
-    glBegin(GL_QUADS);
-    glTexCoord2f(0.0f, 0.0f);
-    glVertex2d(x, y);
-    glTexCoord2f(1.0f, 0.0f);
-    glVertex2d(x + w, y);
-    glTexCoord2f(1.0f, 1.0f);
-    glVertex2d(x + w, y + h);
-    glTexCoord2f(0.0f, 1.0f);
-    glVertex2d(x, y + h);
-    glEnd();
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glDisable(GL_TEXTURE_2D);
+    render_rectangle(mainArea, (tRectangle){{x - LCD_BORDER, y - LCD_BORDER},
+                                            {w + LCD_BORDER * 2.0, h + LCD_BORDER * 2.0}});
+    
+    render_texture(mainArea, (tRectangle){{x, y},
+                                            {w, h}}, gLcdTexture);
 }
 
 void render_dial_knob(void) {
@@ -279,9 +271,9 @@ static void render_button_at(tButtonKey key, double x, double y, double w, doubl
     render_text(mainArea, (tRectangle){{x + 4.0, y + h * 0.2}, {0.0, h * 0.6}}, (char *)btn->label);
 }
 
-void render_button_panel(tRectangle area) {
-    double                  ox          = area.coord.x;
-    double                  oy          = area.coord.y;
+void render_button_panel() {
+    double                  ox          = 10;
+    double                  oy          = 160;
 
     // Clear stale hit rectangles for buttons not placed in this layout
     for (int i = 0; i < NUM_BUTTONS; i++) {

@@ -262,9 +262,9 @@ static void render_frame(GLFWwindow * win) {
     tRectangle lcdArea  = {{lcdX, lcdY}, {lcdDispW, lcdDispH}};
     tRectangle btnArea  = {{0.0, lcdY + lcdDispH + LCD_BORDER + 8.0}, {logW, button_panel_height(logW)}};
 
-    render_lcd(lcdArea);
+    render_lcd();
     render_dial_knob();
-    render_button_panel(btnArea);
+    render_button_panel();
     render_context_menu();
 
     glfwSwapBuffers(win);

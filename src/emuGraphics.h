@@ -29,7 +29,7 @@ extern "C" {
 #define LCD_BORDER    6.0    // green surround around the LCD texture
 
 // Render the 240×64 LCD bitmap, scaled to fit the given rectangle.
-void render_lcd(tRectangle area);
+void render_lcd();
 
 // Large rotary dial (right of LCD).
 void render_dial_knob(void);
@@ -37,7 +37,7 @@ bool dial_hit_test(tCoord coord);
 void dial_nudge(int delta);   // +ve = clockwise / increment
 
 // Render the button panel below the LCD.
-void render_button_panel(tRectangle area);
+void render_button_panel();
 
 // Initialise the LCD OpenGL texture (call once after GL context is ready).
 void init_lcd_texture(void);
