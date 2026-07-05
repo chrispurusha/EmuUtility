@@ -76,8 +76,6 @@ static bool   gDialDrag      = false;
 static double gDialPrevX     = 0.0; // previous cursor x — used for horizontal delta
 static double gDialPrevY     = 0.0; // previous cursor y — used for vertical delta
 static double gDialAccum     = 0.0;
-static double gDialStartX    = 0.0; // cursor position at press — used for restore on release
-static double gDialStartY    = 0.0;
 static double gDialPrevAngle = 0.0; // previous mouse angle around dial centre — used for rotary mode
 static int    gDialSkipCount = 0;   // skip first N cursor_pos events after CURSOR_DISABLED — covers stale events + transition event
 
@@ -97,13 +95,21 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     // A release that ends an active dial drag takes priority over other click
     // routing below (context menu, buttons) — the drag consumes the release
     // regardless of what's now under the cursor. Matches G2-Edit/mouseHandle.c.
+    //
+    // No explicit glfwSetCursorPos() here (there used to be one, restoring
+    // gDialStartX/Y) — GLFW's cocoa backend already restores the cursor to
+    // wherever it was when CURSOR_DISABLED was entered as soon as we switch
+    // back to NORMAL (see updateCursorMode() in cocoa_window.m). An extra
+    // explicit warp on top of that was redundant, and — per the equivalent
+    // fix in SynthEdit's mouseHandle.c — two independent warps in a row can
+    // land a pixel or two off from each other. Harmless there in practice
+    // since there's only the one dial on screen, but no reason to keep it.
     if (!pressed && gDialDrag) {
         gDialDrag       = false;
         gDialSkipCount  = 0;
 
         if (gDialMode != eDialModeRotary) {
             glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-            glfwSetCursorPos(win, gDialStartX, gDialStartY);
         }
         gDialDragActive = false;
         gNeedLcdFull    = true; // final full sync supersedes the throttled polling done during the drag
@@ -122,8 +128,6 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     if (pressed && dial_hit_test(coord)) {
         gDialDrag       = true;
         gDialAccum      = 0.0;
-        gDialStartX     = x;
-        gDialStartY     = y;
         gDialPrevX      = x;
         gDialPrevY      = y;
         gDialDragActive = true;
