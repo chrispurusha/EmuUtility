@@ -54,6 +54,15 @@ static tCoord window_to_logical(void * win, double x, double y) {
     return coord;
 }
 
+// Supplied for SynthLib's contextMenu.c to link against — see mouseHandle.h.
+void get_global_gui_scaled_mouse_coord(tCoord * coord) {
+    double x = 0.0;
+    double y = 0.0;
+
+    glfwGetCursorPos(gWindow, &x, &y);
+    *coord = window_to_logical(gWindow, x, y);
+}
+
 // Scale a window-space delta to logical-space delta
 static double delta_to_logical(void * win, double winDelta, bool isX) {
     int winW = 0;
@@ -117,11 +126,8 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
         return;
     }
 
-    if (close_context_menu_if_outside(coord)) {
-        return;
-    }
-
-    if (handle_context_menu_click(coord)) {
+    if (gContextMenu.active) {
+        handle_context_menu_click(coord); // closes the menu whether the click landed on an item or outside it
         return;
     }
 
