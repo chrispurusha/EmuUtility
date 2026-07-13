@@ -260,6 +260,28 @@ int midi_scan_devices(void) {
             LOG_DEBUG("MIDI dest %lu: %s\n", (unsigned long)i, buf);
         }
         midi_send_to(idReq, sizeof(idReq), dest);
+
+        // Small stagger between each destination's identity request — ported
+        // from SynthEdit's identical fix (midiComms.c, 2026-07-13), found
+        // debugging a Korg Z1 that connected in under a second alone but
+        // took 20+ seconds or hung entirely with 3 other synths (Moog
+        // Minitaur, Waldorf Pulse, ASM Hydrasynth) sharing the same
+        // interface. Blasting every destination's request back-to-back with
+        // zero gap made all their replies land at nearly the same instant on
+        // the interface's merged input, where they likely collide/corrupt
+        // rather than interleave cleanly, rather than any bug in the
+        // matching logic itself. Matters more here than in SynthEdit: this
+        // function only runs once at startup (or on a CoreMIDI setup-change
+        // notification, see midi_notify_cb above) with no periodic retry
+        // loop behind it, so a single collision leaves the E-mu undetected
+        // until something re-triggers a rescan, rather than quietly
+        // succeeding a couple seconds later. CFRunLoopRunInMode, not
+        // usleep/nanosleep — this thread is CFRunLoop-driven throughout (see
+        // midi_thread()'s own comment above), not the platform-thread model
+        // those assume.
+        if ((i + 1) < destCount) {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.015, false);
+        }
     }
 
     if ((srcCount > 0) && (destCount > 0)) {
