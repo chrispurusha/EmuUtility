@@ -39,6 +39,7 @@ extern "C" {
 #include "utils.h"
 #include "utilsGraphics.h"
 #include "mouseHandle.h"
+#include "appMenuBar.h"
 
 // Convert GLFW window-space (x,y) to logical canvas coordinates.
 static tCoord window_to_logical(void * win, double x, double y) {
@@ -126,7 +127,22 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
         return;
     }
 
+    // Checked ahead of everything else on mouse-down — mirrors G2-Edit/mouseHandle.c's ordering,
+    // since the bar itself needs first refusal on a click before it's treated as a dial/button hit
+    // or as closing whatever context menu (bar dropdown or otherwise) is currently open.
+    if (pressed && handle_menu_bar_click(gAppMenuBar, app_menu_bar_rect(), coord)) {
+        return;
+    }
+
     if (gContextMenu.active) {
+        // Same click's mouse-down just opened/switched/closed this dropdown via
+        // handle_menu_bar_click() above — landing back on the bar itself on mouse-up is not a
+        // dropdown-item selection, so leave the state exactly as mouse-down left it. Must be
+        // checked before handle_context_menu_click(): that call closes the menu itself whenever
+        // coord doesn't land on any open item, which a bar click never does.
+        if (!pressed && within_rectangle(coord, app_menu_bar_rect())) {
+            return;
+        }
         handle_context_menu_click(coord); // closes the menu whether the click landed on an item or outside it
         return;
     }

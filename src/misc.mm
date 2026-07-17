@@ -17,139 +17,33 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// Everything that doesn't strictly need Objective-C/Cocoa has moved out of this file — the
+// Device/Controls menus live in appMenuBar.c, and settings persistence lives in persistence.c
+// (backed by SynthLib's cross-platform prefs.h rather than NSUserDefaults). What's left here is
+// genuinely Mac-only: the minimal native app menu Cocoa itself requires, and sleep/wake
+// notifications (NSWorkspace has no cross-platform equivalent in this codebase).
+
 #import "misc.h"
 #import <Cocoa/Cocoa.h>
-#include "defs.h"
-#include "globalVars.h"
-#include "graphics.h"
+
 #include "midiComms.h"
+#include "prefs.h"
 
-@interface EmuMenuTarget : NSObject
-- (void)scanDevices:(id)sender;
-- (void)setDialModeRotary:(id)sender;
-- (void)setDialModeVertical:(id)sender;
-- (void)setDialModeHorizontal:(id)sender;
-- (BOOL)validateMenuItem:(NSMenuItem *)item;
-@end
-
-@implementation EmuMenuTarget
-
-- (void)scanDevices:(id)sender {
-    midi_scan_devices();
-    wake_glfw();
-}
-
-- (void)setDialModeRotary:(id)sender {
-    gDialMode = eDialModeRotary;
-    [[NSUserDefaults standardUserDefaults] setInteger:gDialMode forKey:@"dialMode"];
-}
-
-- (void)setDialModeVertical:(id)sender {
-    gDialMode = eDialModeVertical;
-    [[NSUserDefaults standardUserDefaults] setInteger:gDialMode forKey:@"dialMode"];
-}
-
-- (void)setDialModeHorizontal:(id)sender {
-    gDialMode = eDialModeHorizontal;
-    [[NSUserDefaults standardUserDefaults] setInteger:gDialMode forKey:@"dialMode"];
-}
-
-- (BOOL)validateMenuItem:(NSMenuItem *)item {
-    SEL action = [item action];
-
-    if (action == @selector(setDialModeRotary:)) {
-        [item setState:(gDialMode == eDialModeRotary) ? NSControlStateValueOn : NSControlStateValueOff];
-    } else if (action == @selector(setDialModeVertical:)) {
-        [item setState:(gDialMode == eDialModeVertical) ? NSControlStateValueOn : NSControlStateValueOff];
-    } else if (action == @selector(setDialModeHorizontal:)) {
-        [item setState:(gDialMode == eDialModeHorizontal) ? NSControlStateValueOn : NSControlStateValueOff];
-    }
-    return YES;
-}
-
-@end
-
+// Sets up the minimal native Cocoa app menu (Quit/About/Hide/Services — GLFW's Cocoa backend
+// already populates these at index 0), then restores window/dial-mode state from the prefs file
+// (see load_saved_settings() in persistence.c; settings used to live in NSUserDefaults, now a
+// plain text file via SynthLib's prefs.h so the same mechanism can work on Windows/Linux too).
+// Device/Controls menus used to be constructed here too; they're now the in-window bar built in
+// src/appMenuBar.c on top of SynthLib's menuBar engine.
 void setup_main_menu(void) {
-    NSMenu *               menuBar  = [[NSApplication sharedApplication] mainMenu];
-    static EmuMenuTarget * target   = nil;
-
-    if (target == nil) {
-        target = [[EmuMenuTarget alloc] init];
-    }
+    NSMenu * menuBar = [[NSApplication sharedApplication] mainMenu];
 
     if (menuBar == nil) {
         menuBar = [[NSMenu alloc] init];
         [[NSApplication sharedApplication] setMainMenu:menuBar];
     }
-    NSUserDefaults *       defaults = [NSUserDefaults standardUserDefaults];
-
-    if ([defaults objectForKey:@"dialMode"] != nil) {
-        gDialMode = (tDialMode)[defaults integerForKey:@"dialMode"];
-    }
-
-    if ([defaults objectForKey:@"windowWidth"] != nil) {
-        int savedW = (int)[defaults integerForKey:@"windowWidth"];
-        int savedH = savedW * TARGET_FRAME_BUFF_HEIGHT / TARGET_FRAME_BUFF_WIDTH;
-
-        if (savedW > 0) {
-            resize_window(savedW, savedH);
-        }
-    }
-
-    if ([defaults objectForKey:@"windowX"] != nil && [defaults objectForKey:@"windowY"] != nil) {
-        int savedX = (int)[defaults integerForKey:@"windowX"];
-        int savedY = (int)[defaults integerForKey:@"windowY"];
-
-        reposition_window(savedX, savedY);
-    }
-    NSMenuItem * devMI      = [[NSMenuItem alloc] init];
-    NSMenu *     devMenu    = [[NSMenu alloc] initWithTitle:@"Device"];
-    NSMenuItem * scanItem   = [[NSMenuItem alloc] initWithTitle:@"Scan Devices"
-                               action:@selector(scanDevices:)
-                               keyEquivalent:@"r"];
-    [scanItem setTarget:target];
-    [devMenu addItem:scanItem];
-    [devMI setSubmenu:devMenu];
-    [menuBar insertItem:devMI atIndex:1];
-
-    NSMenuItem * ctrlMI     = [[NSMenuItem alloc] init];
-    NSMenu *     ctrlMenu   = [[NSMenu alloc] initWithTitle:@"Controls"];
-
-    NSMenuItem * rotaryItem = [[NSMenuItem alloc] initWithTitle:@"Rotary"
-                               action:@selector(setDialModeRotary:)
-                               keyEquivalent:@""];
-    [rotaryItem setTarget:target];
-    [ctrlMenu addItem:rotaryItem];
-
-    NSMenuItem * vertItem   = [[NSMenuItem alloc] initWithTitle:@"Vertical"
-                               action:@selector(setDialModeVertical:)
-                               keyEquivalent:@""];
-    [vertItem setTarget:target];
-    [ctrlMenu addItem:vertItem];
-
-    NSMenuItem * horizItem  = [[NSMenuItem alloc] initWithTitle:@"Horizontal"
-                               action:@selector(setDialModeHorizontal:)
-                               keyEquivalent:@""];
-    [horizItem setTarget:target];
-    [ctrlMenu addItem:horizItem];
-
-    [ctrlMI setSubmenu:ctrlMenu];
-    [menuBar insertItem:ctrlMI atIndex:2];
-}
-
-void save_window_size(int w) {
-    NSUserDefaults * defaults = [NSUserDefaults standardUserDefaults];
-
-    [defaults setInteger:w forKey:@"windowWidth"];
-    [defaults synchronize];
-}
-
-void save_window_pos(int x, int y) {
-    NSUserDefaults * defaults = [NSUserDefaults standardUserDefaults];
-
-    [defaults setInteger:x forKey:@"windowX"];
-    [defaults setInteger:y forKey:@"windowY"];
-    [defaults synchronize];
+    prefs_init("EmuUtility");
+    load_saved_settings();
 }
 
 void register_sleep_wake_notifications(void) {

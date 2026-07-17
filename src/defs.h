@@ -64,6 +64,7 @@
 #define MIDI_IDENTITY_REPLY_SUB2      (0x02)
 
 // ── Graphics / layout constants (used by synthlibDefs / utilsGraphics) ───────
+#define MENU_BAR_HEIGHT               (24.0)
 
 // ── Colour macros ─────────────────────────────────────────────────────────────
 
