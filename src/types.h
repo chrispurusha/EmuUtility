@@ -118,12 +118,7 @@ typedef struct {
     uint8_t      ledIndex;
 } tButton;
 
-// ── Dial drag mode ────────────────────────────────────────────────────────────
-
-typedef enum {
-    eDialModeRotary     = 0,   // circular drag around dial centre; cursor visible
-    eDialModeVertical   = 1,   // drag up/down; cursor hidden
-    eDialModeHorizontal = 2,   // drag left/right; cursor hidden
-} tDialMode;
+// tDialMode now lives in SynthLib's synthlibTypes.h (identical across all three apps) — pulled in
+// transitively via geometry.h above.
 
 #endif // __TYPES_H__

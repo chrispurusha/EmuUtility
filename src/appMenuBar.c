@@ -33,6 +33,7 @@ extern "C" {
 #include "misc.h"
 #include "graphics.h"
 #include "appMenuBar.h"
+#include "synthlibPersistence.h"
 
 // Just two menus, each with a handful of items — small enough that (unlike
 // G2-Edit's much larger File/Settings/Backup/Restore/Controls/Tools/View set)
@@ -56,20 +57,20 @@ static void open_device_menu(tCoord anchor) {
 
 static void action_dial_mode_rotary(int index) {
     (void)index;
-    gDialMode = eDialModeRotary;
-    save_dial_mode(gDialMode);
+    synthlib_set_dial_mode(eDialModeRotary);
+    synthlib_save_dial_mode(synthlib_dial_mode());
 }
 
 static void action_dial_mode_vertical(int index) {
     (void)index;
-    gDialMode = eDialModeVertical;
-    save_dial_mode(gDialMode);
+    synthlib_set_dial_mode(eDialModeVertical);
+    synthlib_save_dial_mode(synthlib_dial_mode());
 }
 
 static void action_dial_mode_horizontal(int index) {
     (void)index;
-    gDialMode = eDialModeHorizontal;
-    save_dial_mode(gDialMode);
+    synthlib_set_dial_mode(eDialModeHorizontal);
+    synthlib_save_dial_mode(synthlib_dial_mode());
 }
 
 static void open_controls_menu(tCoord anchor) {
@@ -82,14 +83,14 @@ static void open_controls_menu(tCoord anchor) {
 
     // Labels are fixed strings with a checkmark prefix baked in (tMenuItem has no separate
     // "checked" flag) — point each entry's label at the checked or unchecked variant depending
-    // on gDialMode, rather than mutating the string in place. Same approach as G2-Edit's
-    // open_controls_menu (src/appMenuBar.c there).
+    // on the current dial mode, rather than mutating the string in place. Same approach as
+    // G2-Edit's open_controls_menu (src/appMenuBar.c there).
     static char *    checked[3]   = {"* Rotary", "* Vertical", "* Horizontal"};
     static char *    unchecked[3] = {"Rotary", "Vertical", "Horizontal"};
     int              i;
 
     for (i = 0; i < 3; i++) {
-        items[i].label = ((int)gDialMode == i) ? checked[i] : unchecked[i];
+        items[i].label = ((int)synthlib_dial_mode() == i) ? checked[i] : unchecked[i];
     }
 
     open_context_menu(anchor, items, 0, 0.0);

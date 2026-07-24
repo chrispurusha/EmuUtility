@@ -22,13 +22,8 @@
 
 #include "sysIncludes.h"
 #include "types.h"
+#include "synthlibGlobals.h" // synthlib_quit_requested()/synthlib_request_redraw()/synthlib_window()/synthlib_dial_mode() etc.
 
-// ── Lifecycle ────────────────────────────────────────────────────────────────
-extern _Atomic bool     gQuitAll;
-extern _Atomic bool     gReDraw;
-
-// ── GLFW window ──────────────────────────────────────────────────────────────
-extern void *           gWindow;           // GLFWwindow*; void* avoids pulling GLFW into C headers
 //extern double           gGlobalGuiScale;
 //extern tScrollState     gScrollState;
 
@@ -63,8 +58,5 @@ extern _Atomic double   gLastLcdPollMs;
 // ── LEDs ─────────────────────────────────────────────────────────────────────
 extern _Atomic uint32_t gLeds;            // bitmask of lit LEDs
 extern _Atomic bool     gNeedLeds;        // request LED state next poll
-
-// ── UI ───────────────────────────────────────────────────────────────────────
-extern tDialMode        gDialMode;
 
 #endif // __GLOBAL_VARS_H__

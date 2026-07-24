@@ -28,38 +28,11 @@
 #include "globalVars.h"
 #include "graphics.h"
 #include "prefs.h"
-
-void save_dial_mode(int mode) {
-    prefs_set_int("dialMode", mode);
-}
-
-void save_window_size(int w) {
-    prefs_set_int("windowWidth", w);
-}
-
-void save_window_pos(int x, int y) {
-    prefs_set_int("windowX", x);
-    prefs_set_int("windowY", y);
-}
+#include "synthlibPersistence.h"
 
 // Restores window size/position/dial-mode state saved from a previous run. Called once at
 // startup from setup_main_menu() (misc.mm) — prefs_init() must run before this (also there), so
 // the settings file is loaded before any of these get_* calls.
 void load_saved_settings(void) {
-    gDialMode = (tDialMode)prefs_get_int("dialMode", (long)gDialMode);
-
-    long savedW = prefs_get_int("windowWidth", 0);
-
-    if (savedW > 0) {
-        int savedH = (int)savedW * TARGET_FRAME_BUFF_HEIGHT / TARGET_FRAME_BUFF_WIDTH;
-
-        resize_window((int)savedW, savedH);
-    }
-
-    if (prefs_has_key("windowX") && prefs_has_key("windowY")) {
-        int savedX = (int)prefs_get_int("windowX", 0);
-        int savedY = (int)prefs_get_int("windowY", 0);
-
-        reposition_window(savedX, savedY);
-    }
+    synthlib_load_window_and_dial_mode(TARGET_FRAME_BUFF_WIDTH, TARGET_FRAME_BUFF_HEIGHT);
 }

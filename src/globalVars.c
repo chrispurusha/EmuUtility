@@ -21,10 +21,6 @@
 #include "types.h"
 #include "globalVars.h"
 
-_Atomic bool     gQuitAll        = false;
-_Atomic bool     gReDraw         = true;
-
-void *           gWindow         = NULL;
 //double           gGlobalGuiScale = 1.0;
 //tScrollState     gScrollState    = {0};
 
@@ -48,5 +44,3 @@ _Atomic double   gLastLcdPollMs  = 0.0;
 
 _Atomic uint32_t gLeds           = 0;
 _Atomic bool     gNeedLeds       = true;
-
-tDialMode        gDialMode       = eDialModeVertical;

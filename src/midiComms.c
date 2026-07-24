@@ -125,7 +125,7 @@ static void midi_notify_cb(const MIDINotification * msg, void * refCon) {
     if (msg->messageID == kMIDIMsgSetupChanged) {
         LOG_DEBUG("CoreMIDI setup changed\n");
         midi_scan_devices();
-        gReDraw = true;
+        synthlib_request_redraw();
 
         if (gWakeCb != NULL) {
             gWakeCb();
@@ -344,7 +344,7 @@ static void * midi_thread(void * arg) {
     }
     midi_scan_devices();
 
-    while (!gQuitAll) {
+    while (!synthlib_quit_requested()) {
         // Poll: if session open, request LCD/LED updates as needed
         if (gSessionOpen) {
             // While a dial drag is held, poll for an LCD delta on a steady

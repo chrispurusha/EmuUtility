@@ -61,8 +61,8 @@ void get_global_gui_scaled_mouse_coord(tCoord * coord) {
     double x = 0.0;
     double y = 0.0;
 
-    glfwGetCursorPos(gWindow, &x, &y);
-    *coord = window_to_logical(gWindow, x, y);
+    glfwGetCursorPos(synthlib_window(), &x, &y);
+    *coord = window_to_logical(synthlib_window(), x, y);
 }
 
 // Scale a window-space delta to logical-space delta
@@ -98,15 +98,15 @@ void dial_press_click_handler(tCoord coord, eClickPhase phase, void * userData) 
     }
     gDialDrag       = true;
     gDialAccum      = 0.0;
-    glfwGetCursorPos((GLFWwindow *)gWindow, &gDialPrevX, &gDialPrevY);
+    glfwGetCursorPos((GLFWwindow *)synthlib_window(), &gDialPrevX, &gDialPrevY);
     gDialDragActive = true;
     gLastLcdPollMs  = get_time_ms(); // first poll can fire as soon as the interval elapses
 
-    if (gDialMode == eDialModeRotary) {
+    if (synthlib_dial_mode() == eDialModeRotary) {
         gDialPrevAngle = calculate_mouse_angle(coord, emu_dial_rect());
     } else {
         gDialSkipCount = 3;
-        glfwSetInputMode((GLFWwindow *)gWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        glfwSetInputMode((GLFWwindow *)synthlib_window(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
 }
 
@@ -139,12 +139,12 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
         gDialDrag       = false;
         gDialSkipCount  = 0;
 
-        if (gDialMode != eDialModeRotary) {
+        if (synthlib_dial_mode() != eDialModeRotary) {
             glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         }
         gDialDragActive = false;
         gNeedLcdFull    = true; // final full sync supersedes the throttled polling done during the drag
-        gReDraw         = true;
+        synthlib_request_redraw();
         return;
     }
 
@@ -183,7 +183,7 @@ void handle_cursor_pos(void * win, double x, double y) {
         return;
     }
 
-    if (gDialMode == eDialModeRotary) {
+    if (synthlib_dial_mode() == eDialModeRotary) {
         // Relative tracking — rotating the mouse around the dial centre turns
         // the encoder at the same angular rate, without pinning the indicator
         // to the raw mouse angle (there's no fixed "12 o'clock = value X" on a
@@ -210,7 +210,7 @@ void handle_cursor_pos(void * win, double x, double y) {
         return;
     }
 
-    if (gDialMode == eDialModeHorizontal) {
+    if (synthlib_dial_mode() == eDialModeHorizontal) {
         gDialAccum += delta_to_logical(win, x - gDialPrevX, true) * 0.25;
         gDialPrevX  = x;
     } else {
@@ -280,7 +280,7 @@ void handle_key(void * win, int key, int scancode, int action, int mods) {
         peptalk_send_button_event(bk, false);
         gNeedLcdFull  = true;
         gNeedLcdDelta = false;
-        gReDraw       = true;
+        synthlib_request_redraw();
     }
 }
 
@@ -294,7 +294,7 @@ void handle_scroll(void * win, double dx, double dy) {
     int delta = (int)(dy * 3.0);
     peptalk_send_rotary_event(delta);
     gNeedLcdDelta = true;
-    gReDraw       = true;
+    synthlib_request_redraw();
 }
 
 #ifdef __cplusplus

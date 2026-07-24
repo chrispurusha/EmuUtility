@@ -203,7 +203,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
             gSessionOpen = true;
             gNeedLcdFull = true;
             gNeedLeds    = true;
-            gReDraw      = true;
+            synthlib_request_redraw();
             break;
         }
 
@@ -225,12 +225,12 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                 // Full frame — replace pixels entirely
                 memcpy(gLcd.pixels, tmp, LCD_BYTES);
                 gLcd.refresh++;
-                gReDraw = true;
+                synthlib_request_redraw();
             } else if (unpacked > 0) {
                 // Partial payload in same message type — treat as delta
                 peptalk_apply_lcd_delta(tmp, unpacked);
                 gLcd.refresh++;
-                gReDraw = true;
+                synthlib_request_redraw();
             }
             break;
         }
@@ -252,7 +252,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
             if (unpacked > 0) {
                 peptalk_apply_lcd_delta(tmp, unpacked);
                 gLcd.refresh++;
-                gReDraw = true;
+                synthlib_request_redraw();
             }
             break;
         }
@@ -263,7 +263,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                 uint32_t leds = (uint32_t)(payload[1] << 7) | payload[0];
                 gLeds     = ~leds;
                 gNeedLeds = false;
-                gReDraw   = true;
+                synthlib_request_redraw();
             }
             break;
         }
@@ -273,14 +273,14 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
             // Always request a full dump on any button echo; see mouseHandle.c.
             gNeedLcdFull  = true;
             gNeedLcdDelta = false;
-            gReDraw       = true;
+            synthlib_request_redraw();
             break;
         }
 
         case PEPTALK_ROTARY_EVENT:
         {
             gNeedLcdDelta = true;
-            gReDraw       = true;
+            synthlib_request_redraw();
             break;
         }
 

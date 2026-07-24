@@ -158,7 +158,7 @@ void dial_nudge(int delta) {
         // thread already polls for a delta on its own throttled cadence
         // (see gDialDragActive), independent of individual ticks.
     }
-    gReDraw    = true;
+    synthlib_request_redraw();
 }
 
 static double gDialAngleAccum = 0.0; // fractional degrees of rotation not yet turned into a step
@@ -291,7 +291,7 @@ static void button_click_handler(tCoord coord, eClickPhase phase, void * userDat
     // presses can change the display in ways that compound delta errors.
     gNeedLcdFull  = true;
     gNeedLcdDelta = false;
-    gReDraw       = true;
+    synthlib_request_redraw();
 }
 
 static void render_button_at(tButtonKey key, double x, double y, double w, double h) {

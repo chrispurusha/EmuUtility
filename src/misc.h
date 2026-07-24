@@ -35,10 +35,6 @@ void setup_main_menu(void);
 // prefs_init(). Implemented in persistence.c.
 void load_saved_settings(void);
 
-void save_dial_mode(int mode);
-void save_window_size(int w);
-void save_window_pos(int x, int y);
-
 #ifdef __cplusplus
 }
 #endif
