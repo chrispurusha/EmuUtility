@@ -39,6 +39,7 @@ extern "C" {
 #include "utils.h"
 #include "utilsGraphics.h"
 #include "mouseHandle.h"
+#include "clickRegion.h"
 
 // Convert GLFW window-space (x,y) to logical canvas coordinates.
 static tCoord window_to_logical(void * win, double x, double y) {
@@ -88,6 +89,26 @@ static double gDialAccum     = 0.0;
 static double gDialPrevAngle = 0.0; // previous mouse angle around dial centre — used for rotary mode
 static int    gDialSkipCount = 0;   // skip first N cursor_pos events after CURSOR_DISABLED — covers stale events + transition event
 
+void dial_press_click_handler(tCoord coord, eClickPhase phase, void * userData) {
+    (void)userData;
+
+    if (phase != eClickPress) {
+        return; // release is handled earlier in handle_mouse_button() while gDialDrag is active
+    }
+    gDialDrag       = true;
+    gDialAccum      = 0.0;
+    glfwGetCursorPos((GLFWwindow *)gWindow, &gDialPrevX, &gDialPrevY);
+    gDialDragActive = true;
+    gLastLcdPollMs  = get_time_ms(); // first poll can fire as soon as the interval elapses
+
+    if (gDialMode == eDialModeRotary) {
+        gDialPrevAngle = calculate_mouse_angle(coord, emu_dial_rect());
+    } else {
+        gDialSkipCount = 3;
+        glfwSetInputMode((GLFWwindow *)gWindow, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    }
+}
+
 void handle_mouse_button(void * win, int button, int action, int mods, double x, double y) {
     (void)mods;
 
@@ -128,6 +149,13 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
 
     if (gContextMenu.active) {
         handle_context_menu_click(coord); // closes the menu whether the click landed on an item or outside it
+        return;
+    }
+
+    // Fast path: dial and buttons register their rect at render time (see
+    // emuGraphics.cpp). Falls through to the legacy hit tests below for
+    // anything dispatch_click_region() didn't match (should be nothing today).
+    if (dispatch_click_region(coord, pressed ? eClickPress : eClickRelease)) {
         return;
     }
 

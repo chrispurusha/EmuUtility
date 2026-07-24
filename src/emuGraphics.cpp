@@ -36,6 +36,8 @@ extern "C" {
 #include "utilsGraphics.h"
 #include "emuGraphics.h"
 #include "peptalk.h"
+#include "mouseHandle.h"
+#include "clickRegion.h"
 
 static GLuint   gLcdTexture  = 0;
 static uint32_t gLastRefresh = 0xFFFFFFFF;
@@ -135,6 +137,8 @@ void render_dial_knob(void) {
 
     set_rgb_colour((tRgb){0.90, 0.90, 0.90});
     render_radial_line(mainArea, centre, DIAL_RADIUS * 0.75, angle, 5.0);
+
+    register_click_region(emu_dial_rect(), eClickLayerPanel, dial_press_click_handler, NULL);
 }
 
 tRectangle emu_dial_rect(void) {
@@ -275,6 +279,25 @@ static tButton * find_button(tButtonKey key) {
     return NULL;
 }
 
+// Buttons act on both press and release (unlike the dial, which only arms on
+// press) — mirrors the "btn->pressed = pressed" line previously in
+// handle_mouse_button()'s button_at() branch.
+static void button_click_handler(tCoord coord, eClickPhase phase, void * userData) {
+    (void)coord;
+    tButton * btn     = (tButton *)userData;
+    bool      pressed = (phase == eClickPress);
+
+    LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
+    btn->pressed  = pressed;
+    peptalk_send_button_event(btn->key, pressed);
+    // Always request a full dump after any button press. Deltas are only
+    // safe when we know the hardware's base state hasn't drifted — button
+    // presses can change the display in ways that compound delta errors.
+    gNeedLcdFull  = true;
+    gNeedLcdDelta = false;
+    gReDraw       = true;
+}
+
 static void render_button_at(tButtonKey key, double x, double y, double w, double h) {
     tButton * btn   = find_button(key);
 
@@ -284,6 +307,7 @@ static void render_button_at(tButtonKey key, double x, double y, double w, doubl
     btn->rectangle = (tRectangle){{
                                       x, y
                                   }, {w, h}};
+    register_click_region(btn->rectangle, eClickLayerPanel, button_click_handler, btn);
 
     uint32_t  leds  = gLeds;
     bool      ledOn = btn->hasLed && (leds & (1u << btn->ledIndex));

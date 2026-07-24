@@ -256,6 +256,8 @@ static void render_frame(GLFWwindow * win) {
     glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
+    clear_click_regions();
+
     //double     logW     = /*(double)get_render_width() /*/ gGlobalGuiScale;
     //double     logH     = TARGET_FRAME_BUFF_HEIGHT;
 

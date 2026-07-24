@@ -21,12 +21,18 @@
 #define __MOUSE_HANDLE_H__
 
 #include "types.h"
+#include "clickRegion.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 void handle_mouse_button(void * win, int button, int action, int mods, double x, double y);
+
+// Arms the dial-drag state (gDialDrag et al, private to mouseHandle.c) on press;
+// registered by emuGraphics.cpp's render_dial_knob() as the dial's click region.
+// Release is handled separately, earlier in handle_mouse_button() — see there.
+void dial_press_click_handler(tCoord coord, eClickPhase phase, void * userData);
 void handle_cursor_pos(void * win, double x, double y);
 void handle_key(void * win, int key, int scancode, int action, int mods);
 void handle_scroll(void * win, double dx, double dy);
