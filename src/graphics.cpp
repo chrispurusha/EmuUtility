@@ -42,6 +42,7 @@ extern "C" {
 #include "misc.h"
 #include "graphics.h"
 #include "appMenuBar.h"
+#include "synthlibHost.h"
 
 static float gContentScale = 2.0f;
 
@@ -151,6 +152,13 @@ void wake_glfw(void) {
     glfwPostEmptyEvent();
 }
 
+// SynthLib's popup/panel mechanisms (contextMenu.c, menuBar.c, alertDialog.cpp, bankBrowser.cpp,
+// fileBrowser.cpp) call this via synthlib_request_redraw() instead of setting gReDraw directly —
+// see synthlib_host_init()'s call site in init_graphics() below.
+static void request_redraw(void) {
+    gReDraw = true;
+}
+
 // ── Setup co-ordinate system ──────────────────────────────────────────────────
 
 static void setup_projection(GLFWwindow * win) {
@@ -201,6 +209,15 @@ void init_graphics(void) {
     char title[128] = {0};
 
     snprintf(title, sizeof(title), "%s - Build %s %s", WINDOW_TITLE, __DATE__, __TIME__);
+
+    // Single injection point replacing the `extern "C" _Atomic bool gReDraw;` / `extern "C" void
+    // get_global_gui_scaled_mouse_coord(tCoord *);` previously redeclared in every SynthLib popup/
+    // panel file (contextMenu.c, menuBar.c, alertDialog.cpp, bankBrowser.cpp, fileBrowser.cpp) —
+    // see synthlibHost.h's own comment.
+    synthlib_host_init((tSynthLibHost){
+        .requestRedraw = request_redraw,
+        .mouseCoord    = get_global_gui_scaled_mouse_coord,
+    });
 
     glfwSetErrorCallback(error_callback);
 
