@@ -33,7 +33,6 @@ void render_lcd();
 
 // Large rotary dial (right of LCD).
 void render_dial_knob(void);
-bool dial_hit_test(tCoord coord);
 void dial_nudge(int delta);   // +ve = clockwise / increment
 tRectangle emu_dial_rect(void);
 
@@ -48,10 +47,6 @@ void render_button_panel();
 
 // Initialise the LCD OpenGL texture (call once after GL context is ready).
 void init_lcd_texture(void);
-
-// Hit-test a screen coordinate against the button layout.
-// Returns a pointer to the matched tButton, or NULL.
-tButton * button_at(tCoord coord);
 
 // Total panel height needed for buttons below the LCD.
 double button_panel_height(double areaWidth);

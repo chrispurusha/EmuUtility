@@ -147,10 +147,6 @@ tRectangle emu_dial_rect(void) {
                         }, {DIAL_RADIUS * 2.0, DIAL_RADIUS * 2.0}};
 }
 
-bool dial_hit_test(tCoord coord) {
-    return within_rectangle(coord, emu_dial_rect());
-}
-
 void dial_nudge(int delta) {
     int next = ((int)gDialValue + delta % (int)DIAL_RANGE + (int)DIAL_RANGE * 64) % (int)DIAL_RANGE;
 
@@ -281,7 +277,7 @@ static tButton * find_button(tButtonKey key) {
 
 // Buttons act on both press and release (unlike the dial, which only arms on
 // press) — mirrors the "btn->pressed = pressed" line previously in
-// handle_mouse_button()'s button_at() branch.
+// handle_mouse_button()'s inline hit-test (removed from mouseHandle.c).
 static void button_click_handler(tCoord coord, eClickPhase phase, void * userData) {
     (void)coord;
     tButton * btn     = (tButton *)userData;
@@ -373,16 +369,6 @@ void render_button_panel() {
             render_button_at(np[nr][nc], ox + RP_NP_X + nc * RP_NP_STR, ny, RP_NP_W, LP_H);
         }
     }
-}
-
-tButton * button_at(tCoord coord) {
-    for (int i = 0; i < NUM_BUTTONS; i++) {
-        if (within_rectangle(coord, gButtons[i].rectangle)) {
-            return &gButtons[i];
-        }
-    }
-
-    return NULL;
 }
 
 #ifdef __cplusplus

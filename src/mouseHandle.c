@@ -168,44 +168,14 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
         return;
     }
 
-    // Fast path: dial and buttons register their rect at render time (see
-    // emuGraphics.cpp). Falls through to the legacy hit tests below for
-    // anything dispatch_click_region() didn't match (should be nothing today).
+    // The dial and every button register their rect at render time (see
+    // emuGraphics.cpp) — that's the entire clickable surface below the menu
+    // bar/context menu already handled above, so dispatch alone is
+    // authoritative here; no legacy per-widget hit-test fallback needed.
     if (dispatch_click_region(coord, pressed ? eClickPress : eClickRelease)) {
         return;
     }
-
-    if (pressed && dial_hit_test(coord)) {
-        gDialDrag       = true;
-        gDialAccum      = 0.0;
-        gDialPrevX      = x;
-        gDialPrevY      = y;
-        gDialDragActive = true;
-        gLastLcdPollMs  = get_time_ms(); // first poll can fire as soon as the interval elapses
-
-        if (gDialMode == eDialModeRotary) {
-            gDialPrevAngle = calculate_mouse_angle(coord, emu_dial_rect());
-        } else {
-            gDialSkipCount = 3;
-            glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-        }
-        return;
-    }
-    tButton * btn = button_at(coord);
-
-    if (btn != NULL) {
-        LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
-        btn->pressed  = pressed;
-        peptalk_send_button_event(btn->key, pressed);
-        // Always request a full dump after any button press. Deltas are only
-        // safe when we know the hardware's base state hasn't drifted — button
-        // presses can change the display in ways that compound delta errors.
-        gNeedLcdFull  = true;
-        gNeedLcdDelta = false;
-        gReDraw       = true;
-    } else {
-        LOG_DEBUG("no button at logical(%.0f,%.0f)\n", coord.x, coord.y);
-    }
+    LOG_DEBUG("no click region at logical(%.0f,%.0f)\n", coord.x, coord.y);
 }
 
 void handle_cursor_pos(void * win, double x, double y) {
