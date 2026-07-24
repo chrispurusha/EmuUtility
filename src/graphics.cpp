@@ -41,6 +41,7 @@ extern "C" {
 #include "midiComms.h"
 #include "misc.h"
 #include "graphics.h"
+#include "appMenuBar.h"
 
 static float gContentScale = 2.0f;
 
@@ -274,6 +275,7 @@ static void render_frame(GLFWwindow * win) {
     render_lcd();
     render_dial_knob();
     render_button_panel();
+    render_menu_bar(gAppMenuBar, app_menu_bar_rect());
     render_context_menu();
 
     glfwSwapBuffers(win);
@@ -285,12 +287,20 @@ void do_graphics_loop(void) {
     GLFWwindow * win = (GLFWwindow *)gWindow;
 
     while (!gQuitAll && !glfwWindowShouldClose(win)) {
+        // Polled every tick (not just on cursor move) so a hover-dwell timer elapses even while
+        // the mouse sits still, and so switching from one open top-level menu-bar label to
+        // another happens on hover, not just a second click — matches G2-Edit/graphics.cpp and
+        // SynthEdit/graphics.cpp. Needs glfwWaitEventsTimeout() below rather than
+        // glfwWaitEvents()'s indefinite block for the same reason.
+        update_context_menu_hover();
+        update_menu_bar_hover(gAppMenuBar, app_menu_bar_rect());
+
         bool reDraw = atomic_exchange(&gReDraw, false);
 
         if (reDraw) {
             render_frame(win);
         }
-        glfwWaitEvents();
+        glfwWaitEventsTimeout(0.05);
     }
 }
 

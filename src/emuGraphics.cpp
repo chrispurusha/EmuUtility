@@ -45,7 +45,7 @@ static uint32_t gLastRefresh = 0xFFFFFFFF;
 // ── Dial (large knob, right of LCD) ──────────────────────────────────────────
 
 #define DIAL_CX        1100.0
-#define DIAL_CY        74.0   // vertically centred on the LCD
+#define DIAL_CY        (74.0 + MENU_BAR_HEIGHT)   // vertically centred on the LCD
 #define DIAL_RADIUS    60.0
 #define DIAL_RANGE     128
 
@@ -102,7 +102,7 @@ void render_lcd() {
         update_lcd_texture();
     }
     double x = 200;
-    double y = 20;
+    double y = 20 + MENU_BAR_HEIGHT;
     double w = 500;
     double h = 120;
 
@@ -321,7 +321,7 @@ static void render_button_at(tButtonKey key, double x, double y, double w, doubl
 
 void render_button_panel() {
     double                  ox          = 10;
-    double                  oy          = 160;
+    double                  oy          = 160 + MENU_BAR_HEIGHT;
 
     // Clear stale hit rectangles for buttons not placed in this layout
     for (int i = 0; i < NUM_BUTTONS; i++) {

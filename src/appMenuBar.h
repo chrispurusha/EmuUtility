@@ -17,30 +17,27 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef __MISC_H__
-#define __MISC_H__
+#ifndef __APP_MENU_BAR_H__
+#define __APP_MENU_BAR_H__
+
+#include "sysIncludes.h"
+#include "menuBar.h" // tMenuBarItem/render_menu_bar/handle_menu_bar_click/update_menu_bar_hover — see SynthLib
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// register_sleep_wake_notifications() and setup_main_menu() are implemented in misc.mm — the only
-// two things left in this codebase that genuinely need Objective-C/Cocoa. Everything else
-// declared below is plain C: the Device/Controls menus live in appMenuBar.c, settings persistence
-// (backed by SynthLib's cross-platform prefs.h rather than NSUserDefaults) lives in persistence.c.
-void register_sleep_wake_notifications(void);
-void setup_main_menu(void);
+// EmuUtility's own Device/Controls row, replacing the native Cocoa menu bar
+// (misc.mm) with SynthLib's cross-platform menuBar engine. gAppMenuBar is a
+// NULL-label-terminated tMenuBarItem[] suitable for passing straight into
+// render_menu_bar()/handle_menu_bar_click()/update_menu_bar_hover();
+// app_menu_bar_rect() is the bar's screen rectangle for this frame.
+extern tMenuBarItem gAppMenuBar[];
 
-// Applies saved window size/position and dial mode — called once by setup_main_menu() right after
-// prefs_init(). Implemented in persistence.c.
-void load_saved_settings(void);
-
-void save_dial_mode(int mode);
-void save_window_size(int w);
-void save_window_pos(int x, int y);
+tRectangle app_menu_bar_rect(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif // __MISC_H__
+#endif // __APP_MENU_BAR_H__
