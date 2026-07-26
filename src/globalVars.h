@@ -22,18 +22,26 @@
 
 #include "sysIncludes.h"
 #include "types.h"
+#include "msgQueue.h"
 #include "synthlibGlobals.h" // synthlib_quit_requested()/synthlib_request_redraw()/synthlib_window()/synthlib_dial_mode() etc.
 
 //extern double           gGlobalGuiScale;
 //extern tScrollState     gScrollState;
 
 // ── MIDI / device ────────────────────────────────────────────────────────────
+// All six of these are owned by the MIDI thread (midiComms.c) — only it writes them, and only from
+// its own loop or from a command drained off gToMidiThread. Other threads read gDevice for display
+// and post commands; they must not call into the scan/connect path directly. See msgQueue.h.
 extern tEmuDevice       gDevice;
 extern MIDIClientRef    gMidiClient;
 extern MIDIPortRef      gMidiInPort;
 extern MIDIPortRef      gMidiOutPort;
 extern MIDIEndpointRef  gMidiSource;
 extern MIDIEndpointRef  gMidiDest;
+
+// UI/callback threads -> MIDI thread command queue. Initialised by start_midi_thread() before the
+// thread is created, so a command posted early is safe.
+extern tMessageQueue    gToMidiThread;
 
 // ── PEPTALK session ──────────────────────────────────────────────────────────
 extern _Atomic bool     gSessionOpen;

@@ -52,6 +52,8 @@ void register_sleep_wake_notifications(void) {
      object:nil
      queue:nil
      usingBlock:^(NSNotification * note) {
-         midi_scan_devices();
+         // Delivered on the main thread — post rather than scan here, so the rescan runs on the
+         // MIDI thread that owns gDevice/gMidiSource/gMidiDest and the CoreMIDI port connections.
+         midi_request_reconnect();
      }];
 }

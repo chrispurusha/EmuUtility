@@ -35,7 +35,7 @@ extern "C" {
 #include "globalVars.h"
 #include "utilsGraphics.h"
 #include "emuGraphics.h"
-#include "peptalk.h"
+#include "midiComms.h"
 #include "mouseHandle.h"
 #include "clickRegion.h"
 
@@ -153,7 +153,7 @@ void dial_nudge(int delta) {
     gDialValue = (uint32_t)next;
 
     if (gSessionOpen) {
-        peptalk_send_rotary_event(delta);
+        midi_post_rotary_event(delta);
         // No LCD request here — while a drag is active, the MIDI poll
         // thread already polls for a delta on its own throttled cadence
         // (see gDialDragActive), independent of individual ticks.
@@ -285,7 +285,7 @@ static void button_click_handler(tCoord coord, eClickPhase phase, void * userDat
 
     LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
     btn->pressed  = pressed;
-    peptalk_send_button_event(btn->key, pressed);
+    midi_post_button_event(btn->key, pressed);
     // Always request a full dump after any button press. Deltas are only
     // safe when we know the hardware's base state hasn't drifted — button
     // presses can change the display in ways that compound delta errors.

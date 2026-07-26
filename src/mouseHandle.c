@@ -34,7 +34,7 @@ extern "C" {
 #include "types.h"
 #include "globalVars.h"
 #include "emuGraphics.h"
-#include "peptalk.h"
+#include "midiComms.h"
 #include "menus.h"
 #include "utils.h"
 #include "utilsGraphics.h"
@@ -136,6 +136,11 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     // land a pixel or two off from each other. Harmless there in practice
     // since there's only the one dial on screen, but no reason to keep it.
     if (!pressed && gDialDrag) {
+        // The dial's own press was dispatched through the click registry, so it captured (see
+        // eClickPhase in clickRegion.h). This path consumes the release without reaching
+        // dispatch_click_region(), so drop that capture explicitly — otherwise it stays armed and
+        // the next release to land on empty space would be delivered to the dial handler.
+        cancel_click_region_capture();
         gDialDrag       = false;
         gDialSkipCount  = 0;
 
@@ -156,6 +161,12 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     }
 
     if (gContextMenu.active) {
+        // Same reasoning as the dial-drag path above: an open menu swallows the release, so any
+        // capture left over from the press that opened it must not survive into the next gesture.
+        if (!pressed) {
+            cancel_click_region_capture();
+        }
+
         // Same click's mouse-down just opened/switched/closed this dropdown via
         // handle_menu_bar_click() above — landing back on the bar itself on mouse-up is not a
         // dropdown-item selection, so leave the state exactly as mouse-down left it. Must be
@@ -276,8 +287,8 @@ void handle_key(void * win, int key, int scancode, int action, int mods) {
     }
 
     if (found) {
-        peptalk_send_button_event(bk, true);
-        peptalk_send_button_event(bk, false);
+        midi_post_button_event(bk, true);
+        midi_post_button_event(bk, false);
         gNeedLcdFull  = true;
         gNeedLcdDelta = false;
         synthlib_request_redraw();
@@ -292,7 +303,7 @@ void handle_scroll(void * win, double dx, double dy) {
         return;
     }
     int delta = (int)(dy * 3.0);
-    peptalk_send_rotary_event(delta);
+    midi_post_rotary_event(delta);
     gNeedLcdDelta = true;
     synthlib_request_redraw();
 }

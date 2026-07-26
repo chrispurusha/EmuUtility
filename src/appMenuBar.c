@@ -42,7 +42,7 @@ extern "C" {
 
 static void action_scan_devices(int index) {
     (void)index;
-    midi_scan_devices();
+    midi_request_reconnect(); // the scan itself runs on the MIDI thread, which owns the connection state
     wake_glfw();
 }
 

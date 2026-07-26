@@ -24,19 +24,29 @@
 #include "globalVars.h"
 #include "utils.h"
 #include "peptalk.h"
+#include "msgQueue.h"
 #include "midiComms.h"
 
 #define DIAL_LCD_POLL_INTERVAL_MS    120.0 // how often to poll for an LCD delta while a dial drag is held
 
 static void (*gWakeCb)(void) = NULL;
-static pthread_t       gMidiThread = 0;
-static pthread_mutex_t gSendMutex  = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t            gMidiThread  = 0;
+static pthread_mutex_t      gSendMutex   = PTHREAD_MUTEX_INITIALIZER;
+
+// The MIDI thread's own CFRunLoop, captured once the thread is up. Posting a command signals it so
+// the drain happens promptly instead of waiting out the current CFRunLoopRunInMode interval (up to
+// 33ms when idle — enough to make an on-screen button press feel laggy). Written once by the MIDI
+// thread, read by posting threads; NULL until then, in which case the command still gets drained on
+// the first tick, just without the early wake.
+static _Atomic CFRunLoopRef gMidiRunLoop = NULL;
+
+static int midi_scan_devices(void);
 
 // SysEx reassembly — CoreMIDI fragments large messages across multiple packets
 #define SYSEX_BUF_SIZE    8192
-static uint8_t         gSysExBuf[SYSEX_BUF_SIZE];
-static uint32_t        gSysExLen   = 0;
-static MIDIEndpointRef gSysExSrc   = 0;
+static uint8_t              gSysExBuf[SYSEX_BUF_SIZE];
+static uint32_t             gSysExLen    = 0;
+static MIDIEndpointRef      gSysExSrc    = 0;
 
 // ── Internal send to a specific destination ───────────────────────────────────
 
@@ -63,32 +73,21 @@ static void midi_send_to(const uint8_t * data, uint32_t length, MIDIEndpointRef 
     }
 }
 
-// ── Identity reply handler ────────────────────────────────────────────────────
+// ── Identity reply ────────────────────────────────────────────────────────────
+// Split across two threads on purpose. The CoreMIDI read callback only validates and unpacks the
+// reply (parse_identity_reply, below) then posts it; the MIDI thread does the entity/destination
+// lookup and the writes to gDevice/gMidiSource/gMidiDest, because it owns that state. Before the
+// split, the callback thread wrote all three while the MIDI thread's own scan/poll loop was reading
+// and rewriting them — the same unsynchronized-ownership bug SynthEdit found and fixed on its side
+// (see midi_request_reconnect()'s comment there).
 
-static void handle_identity_reply(MIDIEndpointRef src, const uint8_t * data, uint32_t length) {
-    // F0 7E <device_id> 06 02 <mfr_id> <fam_lsb> <fam_msb> <mem_lsb> <mem_msb> ... F7
-    LOG_DEBUG("identity reply length=%u mfr=0x%02X\n", (unsigned)length, (length >= 6) ? data[5] : 0xFF);
-
-    if (length < 10) {
-        LOG_DEBUG("identity reply too short\n");
-        return;
-    }
-
-    if (data[5] != EMU_MANUFACTURER_ID) {
-        LOG_DEBUG("identity reply mfr 0x%02X != E-mu 0x%02X, ignoring\n", data[5], EMU_MANUFACTURER_ID);
-        return;
-    }
-    uint8_t         deviceId = data[2];
-    uint16_t        family   = (uint16_t)(data[6] | ((uint16_t)data[7] << 7));
-    uint16_t        member   = (uint16_t)(data[8] | ((uint16_t)data[9] << 7));
-
-    LOG_DEBUG("E-mu identity reply: device_id=0x%02X family=%u member=%u\n",
-              deviceId, (unsigned)family, (unsigned)member);
+// Runs on the MIDI thread, from the gToMidiThread drain.
+static void handle_identity_reply(const tIdentityReplyData * reply) {
+    MIDIEndpointRef src    = (MIDIEndpointRef)reply->source;
+    MIDIEntityRef   entity = 0;
+    MIDIEndpointRef dest   = 0;
 
     // Find the destination endpoint in the same entity as the replying source
-    MIDIEntityRef   entity   = 0;
-    MIDIEndpointRef dest     = 0;
-
     if (MIDIEndpointGetEntity(src, &entity) == noErr && entity != 0) {
         ItemCount dests = MIDIEntityGetNumberOfDestinations(entity);
 
@@ -101,9 +100,9 @@ static void handle_identity_reply(MIDIEndpointRef src, const uint8_t * data, uin
         LOG_ERROR("No destination found for E-mu identity reply source\n");
         return;
     }
-    gDevice.id        = deviceId;
-    gDevice.family    = family;
-    gDevice.member    = member;
+    gDevice.id        = reply->deviceId;
+    gDevice.family    = reply->family;
+    gDevice.member    = reply->member;
     gDevice.connected = true;
     gMidiSource       = src;
     gMidiDest         = dest;
@@ -117,6 +116,30 @@ static void handle_identity_reply(MIDIEndpointRef src, const uint8_t * data, uin
     }
 }
 
+// Runs on the CoreMIDI read callback thread.
+static void parse_identity_reply(MIDIEndpointRef src, const uint8_t * data, uint32_t length) {
+    // F0 7E <device_id> 06 02 <mfr_id> <fam_lsb> <fam_msb> <mem_lsb> <mem_msb> ... F7
+    LOG_DEBUG("identity reply length=%u mfr=0x%02X\n", (unsigned)length, (length >= 6) ? data[5] : 0xFF);
+
+    if (length < 10) {
+        LOG_DEBUG("identity reply too short\n");
+        return;
+    }
+
+    if (data[5] != EMU_MANUFACTURER_ID) {
+        LOG_DEBUG("identity reply mfr 0x%02X != E-mu 0x%02X, ignoring\n", data[5], EMU_MANUFACTURER_ID);
+        return;
+    }
+    uint8_t  deviceId = data[2];
+    uint16_t family   = (uint16_t)(data[6] | ((uint16_t)data[7] << 7));
+    uint16_t member   = (uint16_t)(data[8] | ((uint16_t)data[9] << 7));
+
+    LOG_DEBUG("E-mu identity reply: device_id=0x%02X family=%u member=%u\n",
+              deviceId, (unsigned)family, (unsigned)member);
+
+    midi_post_identity_reply(src, deviceId, family, member);
+}
+
 // ── MIDI notification callback ────────────────────────────────────────────────
 
 static void midi_notify_cb(const MIDINotification * msg, void * refCon) {
@@ -124,7 +147,14 @@ static void midi_notify_cb(const MIDINotification * msg, void * refCon) {
 
     if (msg->messageID == kMIDIMsgSetupChanged) {
         LOG_DEBUG("CoreMIDI setup changed\n");
-        midi_scan_devices();
+
+        // This notification is delivered on the MIDI thread's own CFRunLoop (the client was created
+        // there), so calling midi_scan_devices() directly here would in fact be safe. It still goes
+        // through the queue: it keeps ONE rule — "the scan runs from the drain" — rather than one
+        // safe direct caller plus a rule everyone else has to remember, and it means a setup change
+        // arriving mid-drain queues behind the command already being serviced instead of re-entering
+        // the scan from underneath it.
+        midi_request_reconnect();
         synthlib_request_redraw();
 
         if (gWakeCb != NULL) {
@@ -149,7 +179,7 @@ static void dispatch_sysex(MIDIEndpointRef src, const uint8_t * data, uint32_t l
        && (data[1] == MIDI_NON_REALTIME)
        && (data[3] == MIDI_IDENTITY_REQUEST_SUB1)
        && (data[4] == MIDI_IDENTITY_REPLY_SUB2)) {
-        handle_identity_reply(src, data, length);
+        parse_identity_reply(src, data, length);
     } else {
         peptalk_handle_message(data, length);
     }
@@ -212,9 +242,9 @@ static void midi_read_cb(const MIDIPacketList * pktList, void * readProcRefCon, 
     }
 }
 
-// ── Device scanning ───────────────────────────────────────────────────────────
+// ── Device scanning (MIDI thread only — reached via eMsgCmdScanDevices) ──────
 
-int midi_scan_devices(void) {
+static int midi_scan_devices(void) {
     static const uint8_t idReq[]   = {
         MIDI_SYSEX_START,
         MIDI_NON_REALTIME,
@@ -313,12 +343,126 @@ void midi_send(const uint8_t * data, uint32_t length) {
     midi_send_to(data, length, gMidiDest);
 }
 
+// ── Command posting (any thread) ─────────────────────────────────────────────
+
+static void post_to_midi_thread(const tMessageContent * msg) {
+    CFRunLoopRef runLoop = atomic_load(&gMidiRunLoop);
+
+    msg_send(&gToMidiThread, msg);
+
+    // Cut short the MIDI thread's current CFRunLoopRunInMode wait so the command is drained now
+    // rather than up to one idle tick (33ms) later. CFRunLoopWakeUp is documented thread-safe.
+    if (runLoop != NULL) {
+        CFRunLoopWakeUp(runLoop);
+    }
+}
+
+void midi_request_reconnect(void) {
+    tMessageContent msg = {0};
+
+    msg.cmd = eMsgCmdScanDevices;
+    post_to_midi_thread(&msg);
+}
+
+void midi_post_identity_reply(MIDIEndpointRef source, uint8_t deviceId, uint16_t family, uint16_t member) {
+    tMessageContent msg = {0};
+
+    msg.cmd                        = eMsgCmdIdentityReply;
+    msg.identityReplyData.source   = (uint32_t)source;
+    msg.identityReplyData.deviceId = deviceId;
+    msg.identityReplyData.family   = family;
+    msg.identityReplyData.member   = member;
+    post_to_midi_thread(&msg);
+}
+
+void midi_post_button_event(tButtonKey key, bool pressed) {
+    tMessageContent msg = {0};
+
+    msg.cmd                     = eMsgCmdButtonEvent;
+    msg.buttonEventData.key     = (uint32_t)key;
+    msg.buttonEventData.pressed = pressed;
+    post_to_midi_thread(&msg);
+}
+
+void midi_post_rotary_event(int delta) {
+    tMessageContent msg = {0};
+
+    msg.cmd                   = eMsgCmdRotaryEvent;
+    msg.rotaryEventData.delta = (int32_t)delta;
+    post_to_midi_thread(&msg);
+}
+
+void midi_post_session_open(void) {
+    tMessageContent msg = {0};
+
+    msg.cmd = eMsgCmdSessionOpen;
+    post_to_midi_thread(&msg);
+}
+
+// ── Command drain (MIDI thread) ──────────────────────────────────────────────
+// Poll-drained, NOT blocked on (eRcvPoll, not eRcvWait as G2-Edit's USB thread uses): this thread
+// has to keep driving its CFRunLoop so midi_notify_cb fires, and it has its own time-based polling
+// cadence (the LCD delta throttle and the idle tick below). Blocking in msg_receive would stall
+// both. Drains everything queued each tick — unlike the render loop's one-per-frame drain in
+// G2-Edit, nothing here is modal, so there is no reason to spread the work across ticks.
+//
+// eMsgCmdScanDevices is COALESCED: however many arrived this tick, the scan runs at most once,
+// after the rest of the batch. A rescan is a request for a state ("be freshly scanned"), not a
+// discrete event, so N of them must collapse to one — the same rule reverse-queue-design.md gives
+// for gotPatchChangeIndication et al., applied to a command rather than a response. It matters
+// here: a single hub plug/unplug can fire several kMIDIMsgSetupChanged notifications, and each scan
+// walks every destination sending a staggered identity request (15ms apart, see midi_scan_devices),
+// so running the scan per message would multiply that up for no gain. Deferring it to the end of
+// the batch is also the right order — identity replies still in the queue belong to the PREVIOUS
+// scan and should be handled against the connection state that produced them.
+
+static void drain_midi_commands(void) {
+    tMessageContent msg           = {0};
+    bool            scanRequested = false;
+
+    while (msg_receive(&gToMidiThread, eRcvPoll, &msg) == EXIT_SUCCESS) {
+        switch (msg.cmd) {
+            case eMsgCmdScanDevices:
+                scanRequested = true;
+                break;
+
+            case eMsgCmdIdentityReply:
+                handle_identity_reply(&msg.identityReplyData);
+                break;
+
+            case eMsgCmdSessionOpen:
+                peptalk_send_session_open();
+                break;
+
+            case eMsgCmdButtonEvent:
+                peptalk_send_button_event((tButtonKey)msg.buttonEventData.key,
+                                          msg.buttonEventData.pressed);
+                break;
+
+            case eMsgCmdRotaryEvent:
+                peptalk_send_rotary_event((int)msg.rotaryEventData.delta);
+                break;
+
+            default:
+                LOG_ERROR("Unknown MIDI-thread command %u\n", (unsigned)msg.cmd);
+                break;
+        }
+    }
+
+    if (scanRequested) {
+        midi_scan_devices();
+    }
+}
+
 // ── MIDI poll thread ──────────────────────────────────────────────────────────
 
 static void * midi_thread(void * arg) {
     (void)arg;
 
     LOG_DEBUG("MIDI thread started\n");
+
+    // Publish this thread's run loop so post_to_midi_thread() can cut short the wait below.
+    atomic_store(&gMidiRunLoop, CFRunLoopGetCurrent());
 
     // Create MIDI client here (not on main thread) so MIDIClientCreate does not
     // block app startup.  The notification callback is tied to this thread's
@@ -345,6 +489,10 @@ static void * midi_thread(void * arg) {
     midi_scan_devices();
 
     while (!synthlib_quit_requested()) {
+        // Service queued commands first, so a scan/identity/button posted since the last tick is
+        // applied before this tick's polling decisions read the state it may have just changed.
+        drain_midi_commands();
+
         // Poll: if session open, request LCD/LED updates as needed
         if (gSessionOpen) {
             // While a dial drag is held, poll for an LCD delta on a steady
@@ -389,12 +537,18 @@ static void * midi_thread(void * arg) {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);
     }
     LOG_DEBUG("MIDI thread exiting\n");
+    atomic_store(&gMidiRunLoop, NULL);
     return NULL;
 }
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 
 int start_midi_thread(void) {
+    // Before pthread_create, not inside the thread: main() registers the sleep/wake notification and
+    // builds the menus first, so a command could in principle be posted before the thread's first
+    // line runs. An initialised-but-undrained queue just holds it until the first tick.
+    msg_init(&gToMidiThread, "toMidiThread", sizeof(tMessageContent));
+
     if (pthread_create(&gMidiThread, NULL, midi_thread, NULL) != 0) {
         LOG_ERROR("pthread_create for MIDI thread failed\n");
         return EXIT_FAILURE;

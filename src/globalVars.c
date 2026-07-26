@@ -31,6 +31,8 @@ MIDIPortRef      gMidiOutPort    = 0;
 MIDIEndpointRef  gMidiSource     = 0;
 MIDIEndpointRef  gMidiDest       = 0;
 
+tMessageQueue    gToMidiThread   = {0};
+
 _Atomic bool     gSessionOpen    = false;
 _Atomic uint8_t  gSessionSeqId   = 0;
 
