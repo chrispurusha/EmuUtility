@@ -70,8 +70,21 @@ static void update_lcd_texture(void) {
     const tRgb     fg = (tRgb)RGB_LCD_FG;
     const tRgb     bg = (tRgb)RGB_LCD_BG;
 
+    // Snapshot the shared LCD buffer under gLcdMutex before expanding it. The
+    // CoreMIDI callback thread mutates gLcd.pixels in place (full memcpy or an
+    // in-place XOR delta), so reading it directly across the whole expansion
+    // loop could tear a frame. Copy out fast, then expand + upload the local
+    // copy with the lock released (no reason to hold it over the GL call).
+    uint8_t        pixels[LCD_BYTES];
+    uint32_t       snapshotRefresh;
+
+    pthread_mutex_lock(&gLcdMutex);
+    memcpy(pixels, gLcd.pixels, LCD_BYTES);
+    snapshotRefresh = gLcd.refresh;
+    pthread_mutex_unlock(&gLcdMutex);
+
     for (int byte = 0; byte < LCD_BYTES; byte++) {
-        uint8_t b = gLcd.pixels[byte];
+        uint8_t b = pixels[byte];
 
         for (int bit = 7; bit >= 0; bit--) {
             int          pixelIdx = (byte * 8) + (7 - bit);
@@ -90,7 +103,7 @@ static void update_lcd_texture(void) {
     glBindTexture(GL_TEXTURE_2D, gLcdTexture);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, LCD_WIDTH, LCD_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
     glBindTexture(GL_TEXTURE_2D, 0);
-    gLastRefresh = gLcd.refresh;
+    gLastRefresh = snapshotRefresh;   // matches the pixels we just uploaded, not a possibly-newer value
 }
 
 void render_lcd() {

@@ -49,6 +49,7 @@ extern _Atomic uint8_t  gSessionSeqId;
 
 // ── LCD ──────────────────────────────────────────────────────────────────────
 extern tLcdBuffer       gLcd;
+extern pthread_mutex_t  gLcdMutex;            // guards gLcd.pixels/refresh: MIDI-callback writer vs UI-thread reader
 extern _Atomic bool     gNeedLcdFull;         // request full LCD dump next poll
 extern _Atomic bool     gNeedLcdDelta;        // request delta LCD dump next poll
 extern _Atomic bool     gLcdPending;          // an LCD request is in-flight; don't send another

@@ -222,14 +222,19 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
             gLcdPending = false;
 
             if (unpacked >= LCD_BYTES) {
-                // Full frame — replace pixels entirely
+                // Full frame — replace pixels entirely. Hold gLcdMutex so the
+                // UI thread can't snapshot a half-written buffer (torn frame).
+                pthread_mutex_lock(&gLcdMutex);
                 memcpy(gLcd.pixels, tmp, LCD_BYTES);
                 gLcd.refresh++;
+                pthread_mutex_unlock(&gLcdMutex);
                 synthlib_request_redraw();
             } else if (unpacked > 0) {
                 // Partial payload in same message type — treat as delta
+                pthread_mutex_lock(&gLcdMutex);
                 peptalk_apply_lcd_delta(tmp, unpacked);
                 gLcd.refresh++;
+                pthread_mutex_unlock(&gLcdMutex);
                 synthlib_request_redraw();
             }
             break;
@@ -250,8 +255,10 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
             LOG_DEBUG("peptalk LCD 0x53 unpacked=%u\n", (unsigned)unpacked);
 
             if (unpacked > 0) {
+                pthread_mutex_lock(&gLcdMutex);
                 peptalk_apply_lcd_delta(tmp, unpacked);
                 gLcd.refresh++;
+                pthread_mutex_unlock(&gLcdMutex);
                 synthlib_request_redraw();
             }
             break;

@@ -37,6 +37,7 @@ _Atomic bool     gSessionOpen    = false;
 _Atomic uint8_t  gSessionSeqId   = 0;
 
 tLcdBuffer       gLcd            = {0};
+pthread_mutex_t  gLcdMutex       = PTHREAD_MUTEX_INITIALIZER;   // guards gLcd.pixels/refresh (MIDI-callback writer vs UI-thread reader)
 _Atomic bool     gNeedLcdFull    = true;
 _Atomic bool     gNeedLcdDelta   = false;
 _Atomic bool     gLcdPending     = false;
