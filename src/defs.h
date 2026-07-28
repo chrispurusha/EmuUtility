@@ -27,7 +27,7 @@
 // Window
 #define WINDOW_TITLE                  "EmuUtility"
 #define TARGET_FRAME_BUFF_WIDTH       (2560)
-#define TARGET_FRAME_BUFF_HEIGHT      (1200)
+#define TARGET_FRAME_BUFF_HEIGHT      (1440)   // 16:9, matching G2-Edit/SynthEdit
 
 // LCD display geometry
 #define LCD_WIDTH                     (240)
