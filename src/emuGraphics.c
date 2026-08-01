@@ -122,16 +122,19 @@ void render_lcd() {
     // Green border around the display area
     set_rgb_colour((tRgb)RGB_LCD_BG);
     render_rectangle(mainArea, (tRectangle){{x - LCD_BORDER, y - LCD_BORDER},
-                                            {w + LCD_BORDER * 2.0, h + LCD_BORDER * 2.0}});
+                                            {w + LCD_BORDER * 2.0, h + LCD_BORDER * 2.0}
+                     });
 
     if (!gSessionOpen) {
         return;
     }
     render_rectangle(mainArea, (tRectangle){{x - LCD_BORDER, y - LCD_BORDER},
-                                            {w + LCD_BORDER * 2.0, h + LCD_BORDER * 2.0}});
+                                            {w + LCD_BORDER * 2.0, h + LCD_BORDER * 2.0}
+                     });
 
     render_texture(mainArea, (tRectangle){{x, y},
-                                          {w, h}}, gLcdTexture);
+                                          {w, h}
+                   }, gLcdTexture);
 }
 
 void render_dial_knob(void) {
@@ -157,7 +160,10 @@ void render_dial_knob(void) {
 tRectangle emu_dial_rect(void) {
     return (tRectangle){{
                             DIAL_CX - DIAL_RADIUS, DIAL_CY - DIAL_RADIUS
-                        }, {DIAL_RADIUS * 2.0, DIAL_RADIUS * 2.0}};
+                        }, {
+                            DIAL_RADIUS * 2.0, DIAL_RADIUS * 2.0
+                        }
+    };
 }
 
 void dial_nudge(int delta) {
@@ -268,7 +274,8 @@ static tButton   gButtons[] = {
     {pkNumpad9,         {0}, "9",        false, false, 0},
     {pkNumpad0,         {0}, "0",        false, false, 0},
     {pkNumpadDot,       {0}, ".",        false, false, 0},
-    {pkNumpadPlusMinus, {0}, "+/-",      false, false, 0}, };
+    {pkNumpadPlusMinus, {0}, "+/-",      false, false, 0},
+};
 
 static const int NUM_BUTTONS = (int)(sizeof(gButtons) / sizeof(gButtons[0]));
 
@@ -315,7 +322,10 @@ static void render_button_at(tButtonKey key, double x, double y, double w, doubl
     }
     btn->rectangle = (tRectangle){{
                                       x, y
-                                  }, {w, h}};
+                                  }, {
+                                      w, h
+                                  }
+    };
     register_click_region(btn->rectangle, eClickLayerPanel, button_click_handler, btn);
 
     uint32_t  leds  = gLeds;
@@ -336,7 +346,10 @@ void render_button_panel() {
     for (int i = 0; i < NUM_BUTTONS; i++) {
         gButtons[i].rectangle = (tRectangle){{
                                                  0.0, 0.0
-                                             }, {0.0, 0.0}};
+                                             }, {
+                                                 0.0, 0.0
+                                             }
+        };
     }
 
     // Row y positions
@@ -345,11 +358,15 @@ void render_button_panel() {
     double                  r2          = r1 + LP_ROW;
 
     // ── Left panel: 2 rows × 10 columns ──────────────────────────────────────
-    static const tButtonKey lp_row0[10] = {pkMaster, pkPresetManage, pkPresetEdit, pkAudition,
-                                           pkF1,     pkF2,           pkF3,         pkF4,      pkF5, pkF6};
-    static const tButtonKey lp_row1[10] = {pkDisk,    pkSampleManage, pkSampleEdit,
-                                           pkAssign1, pkAssign2,      pkAssign3,
-                                           pkExit,    pkPrev,         pkNext, pkEnter};
+    static const tButtonKey lp_row0[10] = {
+        pkMaster, pkPresetManage, pkPresetEdit, pkAudition,
+        pkF1,     pkF2,           pkF3,         pkF4,      pkF5, pkF6
+    };
+    static const tButtonKey lp_row1[10] = {
+        pkDisk,    pkSampleManage, pkSampleEdit,
+        pkAssign1, pkAssign2,      pkAssign3,
+        pkExit,    pkPrev,         pkNext, pkEnter
+    };
 
     for (int c = 0; c < 10; c++) {
         double x = ox + LP_GAP + c * (LP_W + LP_GAP);
@@ -373,7 +390,8 @@ void render_button_panel() {
         {pkNumpad1,         pkNumpad2, pkNumpad3  },
         {pkNumpad4,         pkNumpad5, pkNumpad6  },
         {pkNumpad7,         pkNumpad8, pkNumpad9  },
-        {pkNumpadPlusMinus, pkNumpad0, pkNumpadDot}, };
+        {pkNumpadPlusMinus, pkNumpad0, pkNumpadDot},
+    };
 
     for (int nr = 0; nr < 4; nr++) {
         double ny = r1 + nr * LP_ROW;
