@@ -157,6 +157,9 @@ static void cursor_pos_cb(GLFWwindow * win, double x, double y) {
 static void window_focus_cb(GLFWwindow * win, int focused) {
     (void)win;
 
+    // Back off the LCD polling while nobody is looking — see LCD_UNFOCUSED_PROBE_MS.
+    midi_set_window_focused(focused != GLFW_FALSE);
+
     if (focused == GLFW_FALSE) {
         note_entry_all_notes_off();
     }
@@ -543,6 +546,9 @@ static void backdoor_dump_state(char * out, size_t outMax) {
     used += (size_t)snprintf(out + used, outMax - used, "pid=%d\n", (int)getpid());
 
     used += (size_t)snprintf(out + used, outMax - used, "pressSettleMs=%.0f\n", midi_press_settle_ms());
+
+    used += (size_t)snprintf(out + used, outMax - used, "focused=%s\n",
+                             midi_window_focused() ? "yes" : "no");
 
     used += (size_t)snprintf(out + used, outMax - used, "lcdQuiet=%s\n",
                              midi_lcd_is_quiet() ? "yes" : "no");

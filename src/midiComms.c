@@ -151,6 +151,7 @@ static _Atomic double   gLcdReqUiStampSeen   = 0.0;
 // moved. Its content is deliberately discarded — see LCD_PROBE_WHEN_IDLE.
 static _Atomic bool     gLcdProbeInFlight    = false;
 static double           gLcdLastProbeMs      = 0.0;
+static _Atomic bool     gWindowFocused       = true;
 
 // How long passed between the last two input events. Small means the user is working a control
 // continuously rather than making one change — see LCD_STREAM_GAP_MS.
@@ -206,6 +207,14 @@ void midi_set_press_settle_ms(double ms) {
 
 double midi_press_settle_ms(void) {
     return atomic_load(&gPressSettleMs);
+}
+
+void midi_set_window_focused(bool focused) {
+    atomic_store(&gWindowFocused, focused);
+}
+
+bool midi_window_focused(void) {
+    return atomic_load(&gWindowFocused);
 }
 
 bool midi_lcd_probe_in_flight(void) {
@@ -1438,7 +1447,8 @@ static void * midi_thread(void * arg) {
             // the probe is the ONLY channel by which such a change reaches us.
             if (  gLcdBaseTrusted && !gLcdPendingOwn && !gDialDragActive
                && !gLcdWantFull && !gLcdWantDelta
-               && ((get_time_ms() - gLcdLastProbeMs) >= LCD_IDLE_PROBE_MS)) {
+               && ((get_time_ms() - gLcdLastProbeMs)
+                   >= (atomic_load(&gWindowFocused) ? LCD_IDLE_PROBE_MS : LCD_UNFOCUSED_PROBE_MS))) {
                 gLcdWantDelta   = true;
                 gLcdLastProbeMs = get_time_ms();
             }

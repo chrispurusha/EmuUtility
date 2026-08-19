@@ -115,6 +115,11 @@ bool midi_lcd_reply_describes_stale_screen(void);
 // changed, whose content must not be applied. See LCD_PROBE_WHEN_IDLE.
 bool midi_lcd_probe_in_flight(void);
 
+// Whether our window currently has focus. Only affects how often the idle probe runs — see
+// LCD_UNFOCUSED_PROBE_MS. Safe from any thread.
+void midi_set_window_focused(bool focused);
+bool midi_window_focused(void);
+
 // How long to let the device finish redrawing after an input before asking what its screen now says.
 // Runtime-settable purely so the right value can be MEASURED rather than guessed; 0 disables the
 // wait. See LCD_PRESS_SETTLE_MS.

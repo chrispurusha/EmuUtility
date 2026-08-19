@@ -190,6 +190,14 @@
 // link (see the gSdsState / gSdsRxActive gate in midi_thread), so a dump is never slowed by this.
 #define LCD_IDLE_PROBE_MS    (150.0)
 
+// Probe interval when our window does NOT have focus.
+//
+// The mirror only matters while someone is looking at it. Unfocused, 150 ms polling is continuous
+// traffic on a 31250-baud link for nobody's benefit — and it is shared with whatever else is on that
+// MIDI chain. A second still notices a front-panel change promptly enough that the display is right
+// by the time the window is looked at again, at a fifteenth of the cost.
+#define LCD_UNFOCUSED_PROBE_MS    (1000.0)
+
 // Two input events closer together than this mean the user is STREAMING — holding Inc, or working
 // the dial — rather than making one discrete change.
 //
