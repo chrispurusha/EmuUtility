@@ -52,7 +52,10 @@ uint32_t peptalk_unpack_7bit(const uint8_t * src, uint32_t srcLen, uint8_t * dst
 // display is left exactly as it was, so a bad delta is never briefly painted and then corrected. The
 // caller must then fetch a full frame; nothing short of one can put the picture right. Caller holds
 // gLcdMutex.
-bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen);
+// `commit` false makes this a pure test: it works out whether the delta WOULD change anything and
+// reports that in changedOut, without touching the display. That is how a delta is used as a change
+// detector without ever trusting its content — see LCD_PROBE_WHEN_IDLE.
+bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen, bool commit, bool * changedOut);
 
 // The sequence id the last LCD request went out with. MIDI thread only — it hands this to the
 // outstanding-request state so a reply can be matched to the request that asked for it.

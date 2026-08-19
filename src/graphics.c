@@ -58,6 +58,7 @@ extern "C" {
 #include "synthlibScale.h"
 #include "synthlibPersistence.h"
 #include "noteEntry.h"
+#include "sampleDump.h"
 
 static void setup_projection(GLFWwindow * win);
 
@@ -346,6 +347,10 @@ static void render_frame(GLFWwindow * win) {
 // <container tmp>/emuutil_result.txt and the command file is deleted, so a caller polls for the
 // command file's disappearance to know it is done.
 //   SCREENSHOT <path>  — synchronous render_frame() then glReadPixels + PNG of the whole window
+//   SCREENGRAB <path>  — capture what is CURRENTLY PAINTED, with no render first. SCREENSHOT renders
+//                        before capturing, which repairs a stale window and so cannot be used to
+//                        detect one. Comparing this against LCDDUMP separates "our pixel buffer is
+//                        wrong" from "the buffer is right but the window was never repainted".
 //   LCDDUMP [path]     — the raw 240x64 LCD bitmap as an ASCII grid ('#' lit, '.' unlit) in the
 //                        result file, and, if a path is given, also as a 1:1 240x64 PNG. This is
 //                        what lets the soft-key box geometry be measured in DEVICE pixels rather
@@ -363,6 +368,23 @@ static void render_frame(GLFWwindow * win) {
 //                        because BUTTON fires press and release in one dispatch, which is the one
 //                        thing a real click never does — and the lost-update bugs only show up when
 //                        the edges are separated in time.
+//   SPIN <steps> <gapMs> — nudge the data wheel `steps` times with a real gap between each, on the
+//                        render thread, exactly as a mouse drag's cursor callbacks do. Lets the
+//                        encoder coalescing be measured: N nudges in, fewer PEPTALK events out, and
+//                        the deltas summing to N.
+//   SAMPLEINFO <path>  — parse a .wav and report what would be sent, or why it cannot be. Runs every
+//                        check without touching the sampler, so the limits can be exercised safely.
+//   SENDSAMPLE <path> <n> — load a .wav and send it to the device as sample number n over SDS. Long:
+//                        minutes for anything but a short one. Poll SDSPROGRESS to watch it.
+//   SDSDRYRUN <path> <out> — build the whole SDS stream for a .wav and write it to `out` WITHOUT
+//                        sending anything. Lets the wire format be checked byte for byte before a
+//                        transfer overwrites a sample on real hardware.
+//   GETSAMPLE <n> <out.wav> — ask the device to SEND US sample n, written out as a .wav. This is the
+//                        non-destructive direction: nothing on the sampler changes. An empty slot
+//                        simply never answers, which the standard defines as the response to a
+//                        request for a sample that is not there.
+//   SDSPROGRESS        — packets sent / total, and whether the receiver is handshaking
+//   SDSCANCEL          — abandon a transfer in progress
 //   REFRESH            — ask the device for a full LCD dump on the next poll
 //   STATE              — session/device state plus the on-screen geometry: the LCD rectangle, the
 //                        six soft-key rectangles, and every button's rectangle
@@ -397,6 +419,32 @@ static void backdoor_write_result(const char * text) {
         fputs(text, f);
         fclose(f);
     }
+}
+
+// Reads the framebuffer as it stands. Deliberately does NOT render first — see the SCREENGRAB entry
+// in the command list above.
+static void backdoor_capture(const char * path) {
+    int       w      = get_render_width();
+    int       h      = get_render_height();
+
+    if ((w <= 0) || (h <= 0)) {
+        backdoor_write_result("ERROR: zero-size framebuffer\n");
+        return;
+    }
+    uint8_t * pixels = (uint8_t *)malloc((size_t)w * (size_t)h * 3);
+
+    if (pixels == NULL) {
+        backdoor_write_result("ERROR: out of memory\n");
+        return;
+    }
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+    stbi_flip_vertically_on_write(1);
+
+    int       ok     = stbi_write_png(path, w, h, 3, pixels, w * 3);
+
+    free(pixels);
+    backdoor_write_result(ok ? "OK\n" : "ERROR: stbi_write_png failed\n");
 }
 
 static void backdoor_screenshot(GLFWwindow * win, const char * path) {
@@ -472,13 +520,30 @@ static void backdoor_lcd_dump(const char * pngPath) {
 }
 
 static void backdoor_dump_state(char * out, size_t outMax) {
-    size_t     used = 0;
+    size_t   used      = 0;
 
     used += (size_t)snprintf(out + used, outMax - used,
                              "OK\nsession=%s connected=%s deviceId=0x%02X family=%u member=%u\n",
                              gSessionOpen ? "open" : "closed",
                              gDevice.connected ? "yes" : "no",
                              gDevice.id, (unsigned)gDevice.family, (unsigned)gDevice.member);
+
+    uint32_t rotaryIn  = 0;
+    uint32_t rotaryOut = 0;
+
+    midi_rotary_counts(&rotaryIn, &rotaryOut);
+    used += (size_t)snprintf(out + used, outMax - used, "rotaryTicksIn=%u rotaryMessagesOut=%u\n",
+                             (unsigned)rotaryIn, (unsigned)rotaryOut);
+
+    // The pid, because the backdoor command file lives in the app's CONTAINER and is therefore SHARED
+    // by every running instance. Two of them (say one from Xcode and one from a script) both poll it,
+    // so a command can be answered by whichever gets there first — and a test that dumps the frame
+    // from one instance and refreshes the other compares two unrelated things. That silently wrecked
+    // a whole run of measurements on 2026-08-20; reporting the pid makes the cross-talk detectable.
+    used += (size_t)snprintf(out + used, outMax - used, "pid=%d\n", (int)getpid());
+
+    used += (size_t)snprintf(out + used, outMax - used, "lcdQuiet=%s\n",
+                             midi_lcd_is_quiet() ? "yes" : "no");
 
     used += (size_t)snprintf(out + used, outMax - used, "noteEntryFirstNote=%u\n",
                              (unsigned)note_entry_first_note());
@@ -522,6 +587,8 @@ static void backdoor_dump_state(char * out, size_t outMax) {
 static void backdoor_dispatch(const char * cmd, const char * arg, GLFWwindow * win) {
     if (strcmp(cmd, "SCREENSHOT") == 0) {
         backdoor_screenshot(win, arg);
+    } else if (strcmp(cmd, "SCREENGRAB") == 0) {
+        backdoor_capture(arg);
     } else if (strcmp(cmd, "LCDDUMP") == 0) {
         backdoor_lcd_dump(arg);
     } else if (strcmp(cmd, "BUTTON") == 0) {
@@ -624,6 +691,169 @@ static void backdoor_dispatch(const char * cmd, const char * arg, GLFWwindow * w
         }
 
         backdoor_write_result("OK\n");
+    } else if (strcmp(cmd, "SPIN") == 0) {
+        int steps = 0;
+        int gapMs = 0;
+
+        if (sscanf(arg, "%d %d", &steps, &gapMs) != 2) {
+            backdoor_write_result("ERROR: expected 'SPIN <steps> <gapMs>'\n");
+            return;
+        }
+
+        if ((steps == 0) || (steps > 400) || (steps < -400) || (gapMs < 0) || (gapMs > 500)) {
+            backdoor_write_result("ERROR: steps -400..400 (non-zero), gapMs 0-500\n");
+            return;
+        }
+        int dir   = (steps > 0) ? 1 : -1;
+        int count = (steps > 0) ? steps : -steps;
+
+        for (int i = 0; i < count; i++) {
+            dial_nudge(dir);
+            usleep((useconds_t)gapMs * 1000);
+        }
+
+        backdoor_write_result("OK\n");
+    } else if (strcmp(cmd, "SAMPLEINFO") == 0) {
+        tSampleDump dump     = {0};
+        char        why[256] = {0};
+        char        text[768];
+
+        if (!sample_dump_load_wav(arg, 0, &dump, why, sizeof(why))) {
+            snprintf(text, sizeof(text), "REJECTED: %s\n", why);
+            backdoor_write_result(text);
+            return;
+        }
+        double      secs     = sample_dump_estimate_seconds(&dump);
+
+        snprintf(text, sizeof(text),
+                 "OK\nname=%s\nsource=%u-bit %s @ %u Hz\nsending=16-bit mono, %u samples (%.2fs audio)\n"
+                 "loop=%s%s\npackets=%u\nestimatedTransfer=%.0fs (%.1f min)\n",
+                 dump.sourceName, dump.srcBits, (dump.srcChannels == 2) ? "stereo" : "mono",
+                 dump.sampleRate, dump.frameCount, (double)dump.frameCount / (double)dump.sampleRate,
+                 dump.hasLoop ? "yes" : "none", dump.loopAlternating ? " (alternating)" : "",
+                 sample_dump_packet_count(&dump), secs, secs / 60.0);
+        backdoor_write_result(text);
+        sample_dump_free(&dump);
+    } else if (strcmp(cmd, "SENDSAMPLE") == 0) {
+        char         path[400] = {0};
+        int          number    = -1;
+        const char * lastSpace = strrchr(arg, ' ');
+
+        if ((lastSpace == NULL) || (sscanf(lastSpace + 1, "%d", &number) != 1)) {
+            backdoor_write_result("ERROR: expected 'SENDSAMPLE <path> <sampleNumber>'\n");
+            return;
+        }
+        size_t       pathLen   = (size_t)(lastSpace - arg);
+
+        if (pathLen >= sizeof(path)) {
+            backdoor_write_result("ERROR: path too long\n");
+            return;
+        }
+        memcpy(path, arg, pathLen);
+
+        if ((number < 0) || (number > (int)SDS_MAX_SAMPLE_NUMBER)) {
+            backdoor_write_result("ERROR: sample number out of range\n");
+            return;
+        }
+        tSampleDump  dump      = {0};
+        char         why[256]  = {0};
+        char         text[512];
+
+        if (!sample_dump_load_wav(path, 0, &dump, why, sizeof(why))) {
+            snprintf(text, sizeof(text), "ERROR: %s\n", why);
+            backdoor_write_result(text);
+            return;
+        }
+        snprintf(text, sizeof(text), "OK\nsending %u samples as #%d, %u packets, about %.0fs\n",
+                 (unsigned)dump.frameCount, number, (unsigned)sample_dump_packet_count(&dump),
+                 sample_dump_estimate_seconds(&dump));
+        midi_post_sds_start(&dump, (uint16_t)number, 0);   // ownership moves to the MIDI thread
+        backdoor_write_result(text);
+    } else if (strcmp(cmd, "SDSDRYRUN") == 0) {
+        char        inPath[400]  = {0};
+        char        outPath[400] = {0};
+
+        if (sscanf(arg, "%399s %399s", inPath, outPath) != 2) {
+            backdoor_write_result("ERROR: expected 'SDSDRYRUN <wav> <outFile>'\n");
+            return;
+        }
+        tSampleDump dump         = {0};
+        char        why[256]     = {0};
+        char        text[512];
+
+        if (!sample_dump_load_wav(inPath, 0, &dump, why, sizeof(why))) {
+            snprintf(text, sizeof(text), "ERROR: %s\n", why);
+            backdoor_write_result(text);
+            return;
+        }
+        FILE *      out          = fopen(outPath, "wb");
+
+        if (out == NULL) {
+            backdoor_write_result("ERROR: cannot write the output file\n");
+            sample_dump_free(&dump);
+            return;
+        }
+        uint8_t     frame[128];
+        uint32_t    len          = sample_dump_build_header(&dump, 0, 1, frame);
+        uint32_t    total        = len;
+
+        fwrite(frame, 1, len, out);
+
+        for (uint32_t p = 0; ; p++) {
+            len    = sample_dump_build_packet(&dump, 0, p, frame);
+
+            if (len == 0) {
+                break;
+            }
+            fwrite(frame, 1, len, out);
+            total += len;
+        }
+
+        fclose(out);
+        snprintf(text, sizeof(text), "OK\nbytes=%u packets=%u words=%u rate=%u\n",
+                 (unsigned)total, (unsigned)sample_dump_packet_count(&dump),
+                 (unsigned)dump.frameCount, (unsigned)dump.sampleRate);
+        backdoor_write_result(text);
+        sample_dump_free(&dump);
+    } else if (strcmp(cmd, "GETSAMPLE") == 0) {
+        int  number       = -1;
+        char outPath[400] = {0};
+
+        if (sscanf(arg, "%d %399s", &number, outPath) != 2) {
+            backdoor_write_result("ERROR: expected 'GETSAMPLE <sampleNumber> <out.wav>'\n");
+            return;
+        }
+
+        if ((number < 0) || (number > (int)SDS_MAX_SAMPLE_NUMBER)) {
+            backdoor_write_result("ERROR: sample number out of range\n");
+            return;
+        }
+        midi_post_sds_request((uint16_t)number, outPath);
+        backdoor_write_result("OK\n");
+    } else if (strcmp(cmd, "SDSRX") == 0) {
+        uint32_t got        = 0;
+        uint32_t total      = 0;
+        char     status[96] = {0};
+        bool     running    = midi_sds_rx_progress(&got, &total, status, sizeof(status));
+        char     text[256];
+
+        snprintf(text, sizeof(text), "OK\nreceiving=%s words=%u/%u status=%s\n",
+                 running ? "yes" : "no", (unsigned)got, (unsigned)total, status);
+        backdoor_write_result(text);
+    } else if (strcmp(cmd, "SDSPROGRESS") == 0) {
+        uint32_t sent   = 0;
+        uint32_t total  = 0;
+        bool     closed = false;
+        bool     active = midi_sds_progress(&sent, &total, &closed);
+        char     text[256];
+
+        snprintf(text, sizeof(text), "OK\nactive=%s packets=%u/%u loop=%s\n",
+                 active ? "yes" : "no", (unsigned)sent, (unsigned)total,
+                 closed ? "closed" : "open");
+        backdoor_write_result(text);
+    } else if (strcmp(cmd, "SDSCANCEL") == 0) {
+        midi_post_sds_cancel();
+        backdoor_write_result("OK\n");
     } else if (strcmp(cmd, "REFRESH") == 0) {
         midi_post_lcd_refresh(true);
         backdoor_write_result("OK\n");
@@ -706,6 +936,10 @@ void do_graphics_loop(void) {
         }
         // Cheap no-op access() check per iteration, and skipped entirely (returns immediately)
         // unless EMU_UTILITY_BACKDOOR is set — see the backdoor block's own header comment.
+        // A gesture whose release went missing never survives a frame — see its own comment for why
+        // that matters far more here than a stuck cursor would.
+        recover_lost_dial_drag(win);
+
         backdoor_poll(win);
 
         glfwWaitEventsTimeout(0.05);

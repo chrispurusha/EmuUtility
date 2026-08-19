@@ -73,6 +73,31 @@ void midi_post_lcd_refresh(bool full);
 // Ask for the front-panel LED state. Safe from any thread, same reasoning as the refresh above.
 void midi_post_led_refresh(void);
 
+// ── Sample Dump Standard ─────────────────────────────────────────────────────
+
+// Begin sending a sample to the device. Ownership of dump->samples passes to the MIDI thread, which
+// frees it when the transfer ends however it ends — the caller must not touch it afterwards.
+void midi_post_sds_start(const tSampleDump * dump, uint16_t sampleNumber, uint8_t channel);
+
+// Abandon a transfer in progress.
+void midi_post_sds_cancel(void);
+
+// Hand the MIDI thread a handshake byte seen by the CoreMIDI callback (ACK/NAK/WAIT/CANCEL).
+void midi_post_sds_handshake(uint8_t type, uint8_t packet);
+
+// Ask the device to send us sample `sampleNumber`, writing it to `path` as a .wav when it arrives.
+// NON-DESTRUCTIVE — nothing on the device changes, unlike sending a sample to it.
+void midi_post_sds_request(uint16_t sampleNumber, const char * path);
+
+// Hand the MIDI thread a dump header or data packet seen by the CoreMIDI callback.
+void midi_post_sds_rx_frame(const uint8_t * data, uint32_t length);
+
+// Receive progress. Returns false when nothing is being received.
+bool midi_sds_rx_progress(uint32_t * wordsGot, uint32_t * wordsTotal, char * status, size_t statusMax);
+
+// Progress, for the UI and for tests. Returns false when nothing is being sent.
+bool midi_sds_progress(uint32_t * packetsSent, uint32_t * packetsTotal, bool * closedLoop);
+
 // Hand the MIDI thread the outcome of an LCD reply the CoreMIDI callback has already dealt with.
 void midi_post_lcd_reply(const tLcdReplyData * reply);
 
@@ -81,6 +106,25 @@ void midi_post_lcd_reply(const tLcdReplyData * reply);
 // mismatch alone means nothing, because the device also speaks unprompted. MIDI thread owns the
 // state; the callback thread only reads it.
 bool midi_lcd_reply_suspect(uint8_t replySeq);
+
+// True when the reply in hand describes a screen the user has already moved past — painting it would
+// put an old value on screen over a newer one. See its definition for the measurement behind it.
+bool midi_lcd_reply_describes_stale_screen(void);
+
+// True while the outstanding request is a PROBE — a delta asked purely to learn whether the screen
+// changed, whose content must not be applied. See LCD_PROBE_WHEN_IDLE.
+bool midi_lcd_probe_in_flight(void);
+
+// Has the display stopped moving? True when nothing is on the wire, nothing is wanted, and the last
+// reply came back reporting no change — i.e. the device itself has said "nothing has changed since
+// you last asked". This is the only sound moment to compare our frame against a fetched one: before
+// it, a difference may simply be the device still working through its own backlog rather than
+// anything wrong on our side.
+bool midi_lcd_is_quiet(void);
+
+// Encoder accounting, for measuring the coalescing: how many ticks arrived from the UI, and how many
+// PEPTALK messages those actually became on the wire. Counters only; nothing depends on them.
+void midi_rotary_counts(uint32_t * ticksIn, uint32_t * messagesOut);
 
 // Send MIDI Identity Request to all outputs to discover connected devices. MIDI-THREAD ONLY.
 void midi_send_identity_request(void);

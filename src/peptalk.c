@@ -92,6 +92,7 @@ void peptalk_send_button_event(tButtonKey key, bool pressed) {
 }
 
 void peptalk_send_rotary_event(int delta) {
+    LOG_DEBUG("PEPTALK rotary event delta=%d\n", delta);
     uint16_t enc = (uint16_t)(delta & 0x3FFF);
     uint8_t  data[3];
 
@@ -195,7 +196,7 @@ static bool apply_lcd_delta_to(uint8_t * frame, const uint8_t * unpacked, uint32
 }
 
 // Public form: applies to the live frame only if the whole delta fits. Caller holds gLcdMutex.
-bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen) {
+bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen, bool commit, bool * changedOut) {
     static uint8_t scratch[LCD_BYTES];
 
     memcpy(scratch, gLcd.pixels, LCD_BYTES);
@@ -203,7 +204,16 @@ bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen) {
     if (!apply_lcd_delta_to(scratch, unpacked, unpackedLen)) {
         return false;   // nothing committed; the display keeps the last frame it knew to be whole
     }
-    memcpy(gLcd.pixels, scratch, LCD_BYTES);
+
+    // Whether the screen actually moved. An empty delta is how the device says "nothing has changed
+    // since you last asked", which is the signal that it has finished working through its backlog.
+    if (changedOut != NULL) {
+        *changedOut = (memcmp(gLcd.pixels, scratch, LCD_BYTES) != 0);
+    }
+
+    if (commit) {
+        memcpy(gLcd.pixels, scratch, LCD_BYTES);
+    }
     return true;
 }
 
@@ -297,6 +307,15 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                 break;
             }
 
+            // The user moved on while this was travelling, so it describes a screen that no longer
+            // exists. Painting it would put an old value up over a newer one — ask again instead.
+            if (midi_lcd_reply_describes_stale_screen()) {
+                LOG_DEBUG("Discarding a frame the display has already moved past\n");
+                reply.needsFullFrame = true;
+                midi_post_lcd_reply(&reply);
+                break;
+            }
+
             if (unpacked > LCD_BYTES) {
                 // Longer than a whole frame, so it is neither: a full frame unpacks to EXACTLY
                 // LCD_BYTES, and the device never sends a delta bigger than the frame it would
@@ -339,6 +358,8 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                 gLcd.refresh++;
                 pthread_mutex_unlock(&gLcdMutex);
 
+                reply.changed      = (differed > 0);
+
                 if (wasDelta && (differed > 0)) {
                     LOG_ERROR("DELTA DIVERGENCE: %u of %u bytes wrong before this full frame\n",
                               (unsigned)differed, (unsigned)LCD_BYTES);
@@ -351,7 +372,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                 // delta REQUEST with 0x50 rather than 0x53 when it feels like it, so this branch is
                 // the normal path for a button press, not an oddity.
                 pthread_mutex_lock(&gLcdMutex);
-                bool applied = peptalk_apply_lcd_delta(tmp, unpacked);
+                bool applied = peptalk_apply_lcd_delta(tmp, unpacked, !midi_lcd_probe_in_flight(), &reply.changed);
 
                 if (applied) {
                     gLcd.refresh++;   // only a delta we actually committed is worth a redraw
@@ -372,7 +393,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
         case PEPTALK_LCD_DELTA_RESP:
         {
-            tLcdReplyData reply    = {0};
+            tLcdReplyData reply = {0};
 
             reply.seq = data[4];
 
@@ -385,18 +406,25 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                 break;
             }
 
+            if (midi_lcd_reply_describes_stale_screen()) {
+                LOG_DEBUG("Discarding a delta the display has already moved past\n");
+                reply.needsFullFrame = true;
+                midi_post_lcd_reply(&reply);
+                break;
+            }
+
             if (payloadLen < 10) {
                 midi_post_lcd_reply(&reply);
                 break;
             }
-            uint8_t       tmp[LCD_BYTES + 16];
-            uint32_t      unpacked = peptalk_unpack_7bit(payload + 10, payloadLen - 10, tmp, sizeof(tmp));
+            uint8_t  tmp[LCD_BYTES + 16];
+            uint32_t unpacked = peptalk_unpack_7bit(payload + 10, payloadLen - 10, tmp, sizeof(tmp));
 
             LOG_DEBUG("peptalk LCD 0x53 unpacked=%u\n", (unsigned)unpacked);
 
             if (unpacked > 0) {
                 pthread_mutex_lock(&gLcdMutex);
-                bool applied = peptalk_apply_lcd_delta(tmp, unpacked);
+                bool applied = peptalk_apply_lcd_delta(tmp, unpacked, !midi_lcd_probe_in_flight(), &reply.changed);
 
                 if (applied) {
                     gLcd.refresh++;   // only a delta we actually committed is worth a redraw

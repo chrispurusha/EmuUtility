@@ -26,21 +26,31 @@
 #include "peptalk.h"
 #include "msgQueue.h"
 #include "midiComms.h"
+#include "sampleDump.h"
 
 #define DIAL_LCD_POLL_INTERVAL_MS    120.0 // how often to poll for an LCD delta while a dial drag is held
 
 static void (*gWakeCb)(void) = NULL;
-static pthread_t            gMidiThread          = 0;
-static pthread_mutex_t      gSendMutex           = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t            gMidiThread  = 0;
+static pthread_mutex_t      gSendMutex   = PTHREAD_MUTEX_INITIALIZER;
 
 // The MIDI thread's own CFRunLoop, captured once the thread is up. Posting a command signals it so
 // the drain happens promptly instead of waiting out the current CFRunLoopRunInMode interval (up to
 // 33ms when idle — enough to make an on-screen button press feel laggy). Written once by the MIDI
 // thread, read by posting threads; NULL until then, in which case the command still gets drained on
 // the first tick, just without the early wake.
-static _Atomic CFRunLoopRef gMidiRunLoop         = NULL;
+static _Atomic CFRunLoopRef gMidiRunLoop = NULL;
 
 static int midi_scan_devices(void);
+
+// Defined below, next to the rest of the transfer state machine; declared here because the command
+// drain sits above it.
+static void sds_start(const tSdsStartData * start);
+static void sds_request(const tSdsRequestData * req);
+static void sds_rx_frame(const tSdsRxFrameData * frame);
+static void sds_rx_finish(const char * why, bool writeFile);
+static void sds_handshake(const tSdsHandshakeData * hs);
+static void sds_finish(const char * why);
 
 // ── LCD request state — MIDI THREAD ONLY ─────────────────────────────────────
 // Every one of these used to be an _Atomic global written by BOTH this thread and the CoreMIDI read
@@ -57,19 +67,97 @@ static int midi_scan_devices(void);
 // same split handle_identity_reply() already uses, and the ownership rule msgQueue.h sets out.
 // Coalescing still works: N refresh requests all set the same bit, so they collapse into one
 // transfer, but none of them can be lost.
-static bool                 gLcdWantFull         = true;
-static bool                 gLcdWantDelta        = false;
-static bool                 gLcdWantLeds         = true;
-static bool                 gLcdPendingOwn       = false;
-static int                  gLcdInFlightOwn      = 0;
-static double               gLcdReqMsOwn         = 0.0;
-static bool                 gLcdSettledOwn       = true;
+static bool             gLcdWantFull         = true;
+static bool             gLcdWantDelta        = false;
+static bool             gLcdWantLeds         = true;
+static bool             gLcdPendingOwn       = false;
+static int              gLcdInFlightOwn      = 0;
+static double           gLcdReqMsOwn         = 0.0;
+static bool             gLcdSettledOwn       = true;
+
+// What gLastUiEventMs read when the outstanding request went out, and whether the answer that came
+// back can be trusted as a base for further deltas.
+//
+// A delta describes the screen as it was when the DEVICE computed it. If the user keeps pressing
+// while that ~700 ms transfer is on the wire, the screen moves on underneath it, and the device's
+// idea of "what I last sent you" and ours drift apart by exactly the changes made during the
+// transfer. Measured: 383-447 of 1920 bytes wrong, persisting until a full frame. Deltas stay
+// correct for isolated input — verified bit-exact — so the answer is not to abandon them, but to
+// notice the one condition that spoils them and re-base once the burst is over.
+// Encoder ticks waiting to go out as one message — see ROTARY_COALESCE_MS.
+static _Atomic uint32_t gRotaryTicksIn       = 0;
+static _Atomic uint32_t gRotaryMessagesOut   = 0;
+static int              gRotaryAccum         = 0;
+static double           gRotaryLastSendMs    = 0.0;
+
+// ── Sample Dump Standard transfer — MIDI THREAD ONLY ─────────────────────────
+// Minutes long, so it is a state machine ticked from the poll loop rather than a blocking loop: the
+// thread still has to service its run loop and its command queue throughout. The handshake arrives
+// on the CoreMIDI callback thread and is POSTED here, same ownership rule as everything else.
+typedef enum {
+    sdsIdle = 0,
+    sdsHeaderSent,      // waiting to learn whether anyone is handshaking
+    sdsSending,
+} eSdsState;
+
+static eSdsState        gSdsState            = sdsIdle;
+static tSampleDump      gSdsDump             = {0};
+static uint16_t         gSdsSampleNumber     = 0;
+static uint8_t          gSdsChannel          = 0;
+static uint32_t         gSdsPacket           = 0;        // next packet to send
+static uint32_t         gSdsPacketCount      = 0;
+static double           gSdsWaitStartMs      = 0.0;
+static double           gSdsLastSendMs       = 0.0;
+static bool             gSdsClosedLoop       = false;
+static bool             gSdsAwaitingAck      = false;
+
+// Mirrors for the UI/test reader; MIDI thread is the only writer.
+static _Atomic bool     gSdsActive           = false;
+static _Atomic uint32_t gSdsProgress         = 0;
+static _Atomic uint32_t gSdsTotal            = 0;
+static _Atomic bool     gSdsProgressClosed   = false;
+
+// ── Receiving a sample FROM the device ───────────────────────────────────────
+// The safe direction: a DUMP REQUEST changes nothing on the sampler, where sending a sample TO it
+// overwrites whichever one is selected. Same thread rules — the callback hands frames over, this
+// thread verifies, assembles and answers.
+static bool             gSdsRxActive         = false;
+static bool             gSdsRxHaveHeader     = false;
+static int16_t *        gSdsRxSamples        = NULL;
+static uint32_t         gSdsRxWords          = 0;
+static uint32_t         gSdsRxGot            = 0;
+static uint32_t         gSdsRxRate           = 44100;
+static uint32_t         gSdsRxLoopStart      = 0;
+static uint32_t         gSdsRxLoopEnd        = 0;
+static bool             gSdsRxHasLoop        = false;
+static uint16_t         gSdsRxSampleNumber   = 0;
+static char             gSdsRxPath[400]      = {0};
+static double           gSdsRxLastMs         = 0.0;
+static char             gSdsRxStatus[96]     = "idle";
+
+static _Atomic bool     gSdsRxRunning        = false;
+static _Atomic uint32_t gSdsRxProgressGot    = 0;
+static _Atomic uint32_t gSdsRxProgressTotal  = 0;
+
+static bool             gLcdLastReplyChanged = true;
+static int              gLcdChaseCount       = 0;
+static double           gLcdReqUiStamp       = 0.0;
+
+// Mirror of the above for the CoreMIDI callback thread, which has to decide whether the frame it is
+// holding is still worth painting. Written only by the MIDI thread.
+static _Atomic double   gLcdReqUiStampSeen   = 0.0;
+
+// True while the request on the wire is a probe: a delta asked only to find out WHETHER the screen
+// moved. Its content is deliberately discarded — see LCD_PROBE_WHEN_IDLE.
+static _Atomic bool     gLcdProbeInFlight    = false;
+static double           gLcdLastProbeMs      = 0.0;
+static bool             gLcdDeltaSuspect     = false;
 
 // Read by the CoreMIDI callback for its staleness check, so these must be atomic — but this thread
 // is still their only writer.
-static _Atomic uint8_t      gLcdOutstandingSeq   = 0;
-static _Atomic bool         gLcdOutstandingValid = false;
-static _Atomic int          gLcdOutstandingCount = 0;
+static _Atomic uint8_t  gLcdOutstandingSeq   = 0;
+static _Atomic bool     gLcdOutstandingValid = false;
+static _Atomic int      gLcdOutstandingCount = 0;
 
 // Is this reply one we should refuse to apply?
 //
@@ -82,6 +170,39 @@ static _Atomic int          gLcdOutstandingCount = 0;
 // A reply can only be genuinely STALE if more than one request is actually outstanding, which
 // happens solely when the timeout gave up on one and sent another. That is the discriminator: the
 // mismatch says WHICH reply is the old one, the count says whether an old one can exist at all.
+// See midiComms.h. Read from the render thread by the backdoor; the fields are this thread's, and a
+// slightly stale read only ever delays a test by one tick.
+void midi_rotary_counts(uint32_t * ticksIn, uint32_t * messagesOut) {
+    if (ticksIn != NULL) {
+        *ticksIn = atomic_load(&gRotaryTicksIn);
+    }
+
+    if (messagesOut != NULL) {
+        *messagesOut = atomic_load(&gRotaryMessagesOut);
+    }
+}
+
+bool midi_lcd_is_quiet(void) {
+    return !gLcdPendingOwn && !gLcdWantFull && !gLcdWantDelta && !gLcdLastReplyChanged;
+}
+
+// Does the reply now in hand describe a screen that has already moved on?
+//
+// A transfer takes ~700 ms. If the user touched anything while it was in flight, what arrived is a
+// picture of a moment that has passed — and painting it puts an OLD value on screen over a newer
+// one. Measured directly: a full frame requested at mouse-down arrived 719 ms later still showing
+// P000 while the device had already moved to P011, so the display went P011 -> P000 -> P011.
+//
+// Better to keep showing the last frame we believed than to paint a stale one. The caller asks
+// again, and the next reply — taken after the movement — is correct.
+bool midi_lcd_probe_in_flight(void) {
+    return atomic_load(&gLcdProbeInFlight);
+}
+
+bool midi_lcd_reply_describes_stale_screen(void) {
+    return gLastUiEventMs != atomic_load(&gLcdReqUiStampSeen);
+}
+
 bool midi_lcd_reply_suspect(uint8_t replySeq) {
     if (atomic_load(&gLcdOutstandingCount) <= 1) {
         return false;
@@ -300,10 +421,23 @@ static void dispatch_sysex(MIDIEndpointRef src, const uint8_t * data, uint32_t l
               (length > 4) ? data[4] : 0xFF,
               (length > 5) ? data[5] : 0xFF);
 
-    if (  (length >= 5)
+    // Sample Dump Standard handshake: F0 7E cc <7C WAIT|7D CANCEL|7E NAK|7F ACK> pp F7. Universal
+    // non-realtime like the identity reply, but a different sub-id, so there is no ambiguity. Caught
+    // here because peptalk_handle_message() would reject it — the manufacturer byte is 7E, not E-mu's
+    // 18 — and the transfer would silently fall back to open loop.
+    if (  (length == 6)
        && (data[1] == MIDI_NON_REALTIME)
-       && (data[3] == MIDI_IDENTITY_REQUEST_SUB1)
-       && (data[4] == MIDI_IDENTITY_REPLY_SUB2)) {
+       && (data[3] >= 0x7C) && (data[3] <= 0x7F)) {
+        midi_post_sds_handshake(data[3], data[4]);
+    } else if (  (length >= 6)
+              && (data[1] == MIDI_NON_REALTIME)
+              && ((data[3] == 0x01) || (data[3] == 0x02))) {
+        // Dump header or data packet coming the other way — the device answering our DUMP REQUEST.
+        midi_post_sds_rx_frame(data, length);
+    } else if (  (length >= 5)
+              && (data[1] == MIDI_NON_REALTIME)
+              && (data[3] == MIDI_IDENTITY_REQUEST_SUB1)
+              && (data[4] == MIDI_IDENTITY_REPLY_SUB2)) {
         parse_identity_reply(src, data, length);
     } else {
         peptalk_handle_message(data, length);
@@ -566,6 +700,83 @@ void midi_post_lcd_refresh(bool full) {
     post_to_midi_thread(&msg);
 }
 
+void midi_post_sds_start(const tSampleDump * dump, uint16_t sampleNumber, uint8_t channel) {
+    tMessageContent msg = {0};
+
+    msg.cmd                       = eMsgCmdSdsStart;
+    msg.sdsStartData.dump         = *dump;    // including the samples pointer: ownership moves
+    msg.sdsStartData.sampleNumber = sampleNumber;
+    msg.sdsStartData.channel      = channel;
+    post_to_midi_thread(&msg);
+}
+
+void midi_post_sds_request(uint16_t sampleNumber, const char * path) {
+    tMessageContent msg = {0};
+
+    msg.cmd                         = eMsgCmdSdsRequest;
+    msg.sdsRequestData.sampleNumber = sampleNumber;
+    snprintf(msg.sdsRequestData.path, sizeof(msg.sdsRequestData.path), "%s", path);
+    post_to_midi_thread(&msg);
+}
+
+void midi_post_sds_rx_frame(const uint8_t * data, uint32_t length) {
+    tMessageContent msg = {0};
+
+    if (length > sizeof(msg.sdsRxFrameData.data)) {
+        return;
+    }
+    msg.cmd                   = eMsgCmdSdsRxFrame;
+    msg.sdsRxFrameData.length = length;
+    memcpy(msg.sdsRxFrameData.data, data, length);
+    post_to_midi_thread(&msg);
+}
+
+bool midi_sds_rx_progress(uint32_t * wordsGot, uint32_t * wordsTotal, char * status, size_t statusMax) {
+    if (wordsGot != NULL) {
+        *wordsGot = atomic_load(&gSdsRxProgressGot);
+    }
+
+    if (wordsTotal != NULL) {
+        *wordsTotal = atomic_load(&gSdsRxProgressTotal);
+    }
+
+    if ((status != NULL) && (statusMax > 0)) {
+        snprintf(status, statusMax, "%s", gSdsRxStatus);
+    }
+    return atomic_load(&gSdsRxRunning);
+}
+
+void midi_post_sds_cancel(void) {
+    tMessageContent msg = {0};
+
+    msg.cmd = eMsgCmdSdsCancel;
+    post_to_midi_thread(&msg);
+}
+
+void midi_post_sds_handshake(uint8_t type, uint8_t packet) {
+    tMessageContent msg = {0};
+
+    msg.cmd                     = eMsgCmdSdsHandshake;
+    msg.sdsHandshakeData.type   = type;
+    msg.sdsHandshakeData.packet = packet;
+    post_to_midi_thread(&msg);
+}
+
+bool midi_sds_progress(uint32_t * packetsSent, uint32_t * packetsTotal, bool * closedLoop) {
+    if (packetsSent != NULL) {
+        *packetsSent = atomic_load(&gSdsProgress);
+    }
+
+    if (packetsTotal != NULL) {
+        *packetsTotal = atomic_load(&gSdsTotal);
+    }
+
+    if (closedLoop != NULL) {
+        *closedLoop = atomic_load(&gSdsProgressClosed);
+    }
+    return atomic_load(&gSdsActive);
+}
+
 void midi_post_led_refresh(void) {
     tMessageContent msg = {0};
 
@@ -613,7 +824,7 @@ static void drain_midi_commands(void) {
     while (msg_receive(&gToMidiThread, eRcvPoll, &msg) == EXIT_SUCCESS) {
         switch (msg.cmd) {
             case eMsgCmdScanDevices:
-                scanRequested = true;
+                scanRequested  = true;
                 break;
 
             case eMsgCmdIdentityReply:
@@ -630,7 +841,10 @@ static void drain_midi_commands(void) {
                 break;
 
             case eMsgCmdRotaryEvent:
-                peptalk_send_rotary_event((int)msg.rotaryEventData.delta);
+                // Gathered rather than sent: the flush below turns a flurry of single ticks into one
+                // instruction, so the device redraws once instead of once per tick.
+                gRotaryAccum  += (int)msg.rotaryEventData.delta;
+                atomic_fetch_add(&gRotaryTicksIn, 1);
                 break;
 
             case eMsgCmdLcdRefresh:
@@ -666,10 +880,84 @@ static void drain_midi_commands(void) {
                 if (msg.lcdReplyData.needsFullFrame) {
                     gLcdWantFull = true;
                 }
+
+                // A probe reported movement: it told us THAT, never what. Fetch a whole frame, which
+                // is the only thing allowed to change what is displayed.
+                if (atomic_load(&gLcdProbeInFlight)) {
+                    atomic_store(&gLcdProbeInFlight, false);
+
+                    if (msg.lcdReplyData.changed) {
+                        LOG_DEBUG("Probe saw the screen move; fetching a whole frame\n");
+                        gLcdWantFull = true;
+                    }
+                }
+
+                // Did the user act while this was in flight? Then this delta describes a screen that
+                // has already moved, and everything built on it inherits the gap. Correct it NOW
+                // with a whole frame rather than deferring to the settle.
+                //
+                // Deferring was worse in both directions. It left a visibly wrong screen up for
+                // seconds — measured at ten — because the chase below kept requesting deltas, and
+                // the settle cannot fire while a request is wanted, so the corrective frame queued
+                // behind the very deltas that could not fix it. And it bought nothing: during a
+                // burst these deltas measured 571, 820 and 1001 ms against 715 ms for a whole frame,
+                // so the "cheap" option was not cheaper. Deltas earn their keep on isolated input,
+                // where they are 62-250 ms; under rapid input a full frame is both faster and right.
+                if (  !msg.lcdReplyData.stale && !msg.lcdReplyData.wasFullFrame
+                   && (gLastUiEventMs != gLcdReqUiStamp)) {
+                    gLcdWantFull     = true;
+                    gLcdDeltaSuspect = false;
+                }
+
+                if (msg.lcdReplyData.wasFullFrame) {
+                    gLcdDeltaSuspect = false;
+                }
+
+                // The device is still catching up: it showed us a change we did not ask for by
+                // pressing anything just now, which means more of its own backlog is still to come.
+                // Ask again rather than leaving the screen wherever this reply happened to catch it.
+                if (  !msg.lcdReplyData.stale && msg.lcdReplyData.changed && !gLcdWantFull
+                   && (gLastUiEventMs == gLcdReqUiStamp)) {
+                    if (gLcdChaseCount < LCD_CHASE_MAX) {
+                        gLcdChaseCount++;
+                        gLcdWantDelta = true;
+                    } else {
+                        LOG_DEBUG("LCD chase capped at %d — display may be animating\n", LCD_CHASE_MAX);
+                    }
+                } else if (!msg.lcdReplyData.changed) {
+                    gLcdChaseCount = 0;   // caught up; the next burst starts with a fresh allowance
+                }
+
+                if (!msg.lcdReplyData.stale) {
+                    gLcdLastReplyChanged = msg.lcdReplyData.changed;
+                }
+                break;
+
+            case eMsgCmdSdsStart:
+                sds_start(&msg.sdsStartData);
+                break;
+
+            case eMsgCmdSdsHandshake:
+                sds_handshake(&msg.sdsHandshakeData);
+                break;
+
+            case eMsgCmdSdsCancel:
+                sds_finish("cancelled locally");
+                sds_rx_finish("cancelled locally", false);
+                break;
+
+            case eMsgCmdSdsRequest:
+                sds_request(&msg.sdsRequestData);
+                break;
+
+            case eMsgCmdSdsRxFrame:
+                sds_rx_frame(&msg.sdsRxFrameData);
                 break;
 
             case eMsgCmdUiActivity:
-                gLcdSettledOwn = false;
+                gLcdLastReplyChanged = true; // input means the screen is presumed moving again
+                gLcdSettledOwn       = false;
+                gLcdChaseCount       = 0;    // fresh input, so the chase allowance starts over
                 break;
 
             case eMsgCmdNoteEvent:
@@ -699,6 +987,316 @@ static void drain_midi_commands(void) {
 
     if (scanRequested) {
         midi_scan_devices();
+    }
+}
+
+// ── Sample Dump Standard state machine (MIDI thread) ─────────────────────────
+
+static void sds_finish(const char * why) {
+    if (gSdsState != sdsIdle) {
+        LOG_DEBUG("SDS transfer ended after %u/%u packets: %s\n",
+                  (unsigned)gSdsPacket, (unsigned)gSdsPacketCount, why);
+    }
+    sample_dump_free(&gSdsDump);
+    memset(&gSdsDump, 0, sizeof(gSdsDump));
+    gSdsState       = sdsIdle;
+    gSdsPacket      = 0;
+    gSdsPacketCount = 0;
+    gSdsAwaitingAck = false;
+    gSdsClosedLoop  = false;
+    atomic_store(&gSdsActive, false);
+}
+
+static void sds_send_packet(void) {
+    uint8_t  frame[128];
+    uint32_t len = sample_dump_build_packet(&gSdsDump, gSdsChannel, gSdsPacket, frame);
+
+    if (len == 0) {
+        sds_finish("complete");
+        return;
+    }
+    midi_send(frame, len);
+    gSdsLastSendMs  = get_time_ms();
+    gSdsAwaitingAck = gSdsClosedLoop;   // in closed loop the ACK is what releases the next packet
+    atomic_store(&gSdsProgress, gSdsPacket + 1);
+}
+
+static void sds_start(const tSdsStartData * start) {
+    if (gSdsState != sdsIdle) {
+        LOG_ERROR("SDS transfer already in progress; ignoring the new one\n");
+        // The new sample's buffer would otherwise leak: nothing else owns it now.
+        tSampleDump discard = start->dump;
+        sample_dump_free(&discard);
+        return;
+    }
+    gSdsDump         = start->dump;
+    gSdsSampleNumber = start->sampleNumber;
+    gSdsChannel      = start->channel;
+    gSdsPacket       = 0;
+    gSdsPacketCount  = sample_dump_packet_count(&gSdsDump);
+    gSdsClosedLoop   = false;
+    gSdsAwaitingAck  = false;
+
+    uint8_t  header[24];
+    uint32_t len = sample_dump_build_header(&gSdsDump, gSdsChannel, gSdsSampleNumber, header);
+
+    LOG_DEBUG("SDS start: sample %u, %u words @ %u Hz, %u packets\n",
+              (unsigned)gSdsSampleNumber, (unsigned)gSdsDump.frameCount,
+              (unsigned)gSdsDump.sampleRate, (unsigned)gSdsPacketCount);
+    midi_send(header, len);
+    gSdsWaitStartMs  = get_time_ms();
+    gSdsState        = sdsHeaderSent;
+    atomic_store(&gSdsTotal, gSdsPacketCount);
+    atomic_store(&gSdsProgress, 0);
+    atomic_store(&gSdsActive, true);
+    atomic_store(&gSdsProgressClosed, false);
+}
+
+// Any handshake at all proves the return cable is there, which is what closed loop means.
+static void sds_handshake(const tSdsHandshakeData * hs) {
+    if (gSdsState == sdsIdle) {
+        return;
+    }
+
+    switch (hs->type) {
+        case 0x7F:   // ACK
+            gSdsClosedLoop  = true;
+            gSdsAwaitingAck = false;
+            atomic_store(&gSdsProgressClosed, true);
+
+            if (gSdsState == sdsHeaderSent) {
+                gSdsState = sdsSending;      // accepted; start sending packets
+            } else {
+                gSdsPacket++;                // that packet is confirmed, move on
+            }
+            break;
+
+        case 0x7E:   // NAK — resend the same packet, so gSdsPacket deliberately does not advance
+            gSdsClosedLoop  = true;
+            gSdsAwaitingAck = false;
+            atomic_store(&gSdsProgressClosed, true);
+            LOG_DEBUG("SDS NAK on packet %u; resending\n", (unsigned)hs->packet);
+            break;
+
+        case 0x7C:   // WAIT — hold indefinitely; the next message decides
+            gSdsClosedLoop  = true;
+            gSdsAwaitingAck = true;
+            gSdsLastSendMs  = get_time_ms();   // restart the patience clock
+            LOG_DEBUG("SDS WAIT at packet %u\n", (unsigned)hs->packet);
+            break;
+
+        case 0x7D:   // CANCEL
+            sds_finish("cancelled by the receiver");
+            break;
+
+        default:
+            break;
+    }
+}
+
+static void sds_tick(void) {
+    switch (gSdsState) {
+        case sdsIdle:
+            return;
+
+        case sdsHeaderSent:
+
+            // Nothing came back, so there is no return cable: the standard says assume an open loop
+            // and dump anyway. Slower and unverified, but it is what the standard prescribes.
+            if ((get_time_ms() - gSdsWaitStartMs) >= SDS_HANDSHAKE_TIMEOUT_MS) {
+                LOG_DEBUG("SDS: no handshake within %.0fms, assuming open loop\n",
+                          SDS_HANDSHAKE_TIMEOUT_MS);
+                gSdsClosedLoop = false;
+                gSdsState      = sdsSending;
+                gSdsLastSendMs = 0.0;
+            }
+            return;
+
+        case sdsSending:
+
+            if (gSdsPacket >= gSdsPacketCount) {
+                sds_finish("complete");
+                return;
+            }
+
+            if (gSdsAwaitingAck) {
+                if ((get_time_ms() - gSdsLastSendMs) >= SDS_ACK_TIMEOUT_MS) {
+                    sds_finish("timed out waiting for an acknowledgement");
+                }
+                return;
+            }
+
+            // Open loop has no acknowledgement to pace against, so it is paced by the clock instead.
+            if (  !gSdsClosedLoop
+               && ((get_time_ms() - gSdsLastSendMs) < SDS_OPEN_LOOP_PACE_MS)) {
+                return;
+            }
+            sds_send_packet();
+            return;
+    }
+}
+
+// ── Receiving a sample (MIDI thread) ─────────────────────────────────────────
+
+static void sds_rx_finish(const char * why, bool writeFile) {
+    if (gSdsRxActive && writeFile && (gSdsRxSamples != NULL) && (gSdsRxGot > 0)) {
+        char     err[128] = {0};
+        // Whatever arrived is written even if the dump stopped short — a truncated sample is far
+        // more use than nothing after a transfer measured in minutes.
+        uint32_t count    = (gSdsRxGot < gSdsRxWords) ? gSdsRxGot : gSdsRxWords;
+
+        if (sample_dump_write_wav(gSdsRxPath, gSdsRxSamples, count, gSdsRxRate,
+                                  gSdsRxHasLoop, gSdsRxLoopStart, gSdsRxLoopEnd, err, sizeof(err))) {
+            LOG_DEBUG("SDS receive: wrote %u samples to %s\n", (unsigned)count, gSdsRxPath);
+            snprintf(gSdsRxStatus, sizeof(gSdsRxStatus), "done: %u samples -> %s", (unsigned)count, gSdsRxPath);
+        } else {
+            LOG_ERROR("SDS receive: %s\n", err);
+            snprintf(gSdsRxStatus, sizeof(gSdsRxStatus), "write failed: %s", err);
+        }
+    } else if (gSdsRxActive) {
+        snprintf(gSdsRxStatus, sizeof(gSdsRxStatus), "%s", why);
+    }
+
+    if (gSdsRxActive) {
+        LOG_DEBUG("SDS receive ended (%u/%u words): %s\n",
+                  (unsigned)gSdsRxGot, (unsigned)gSdsRxWords, why);
+    }
+    free(gSdsRxSamples);
+    gSdsRxSamples    = NULL;
+    gSdsRxActive     = false;
+    gSdsRxHaveHeader = false;
+    gSdsRxWords      = 0;
+    gSdsRxGot        = 0;
+    atomic_store(&gSdsRxRunning, false);
+}
+
+static void sds_request(const tSdsRequestData * req) {
+    if (gSdsRxActive || (gSdsState != sdsIdle)) {
+        LOG_ERROR("A sample transfer is already in progress\n");
+        return;
+    }
+    sds_rx_finish("superseded", false);
+    snprintf(gSdsRxPath, sizeof(gSdsRxPath), "%s", req->path);
+    gSdsRxSampleNumber = req->sampleNumber;
+    gSdsRxActive       = true;
+    gSdsRxHaveHeader   = false;
+    gSdsRxGot          = 0;
+    gSdsRxWords        = 0;
+    gSdsRxLastMs       = get_time_ms();
+    snprintf(gSdsRxStatus, sizeof(gSdsRxStatus), "requested sample %u", (unsigned)req->sampleNumber);
+    atomic_store(&gSdsRxRunning, true);
+    atomic_store(&gSdsRxProgressGot, 0);
+    atomic_store(&gSdsRxProgressTotal, 0);
+
+    uint8_t  frame[8];
+    uint32_t len = sample_dump_build_request(0, req->sampleNumber, frame);
+
+    LOG_DEBUG("SDS: requesting sample %u -> %s\n", (unsigned)req->sampleNumber, gSdsRxPath);
+    midi_send(frame, len);
+}
+
+static void sds_rx_header(const uint8_t * d) {
+    // Three 7-bit bytes per field, least significant first.
+    uint32_t period = (uint32_t)d[7] | ((uint32_t)d[8] << 7) | ((uint32_t)d[9] << 14);
+    uint32_t words  = (uint32_t)d[10] | ((uint32_t)d[11] << 7) | ((uint32_t)d[12] << 14);
+    uint32_t loopS  = (uint32_t)d[13] | ((uint32_t)d[14] << 7) | ((uint32_t)d[15] << 14);
+    uint32_t loopE  = (uint32_t)d[16] | ((uint32_t)d[17] << 7) | ((uint32_t)d[18] << 14);
+
+    if ((words == 0) || (words > SDS_MAX_WORDS) || (period == 0)) {
+        sds_rx_finish("the dump header was not usable", false);
+        return;
+    }
+    free(gSdsRxSamples);
+    gSdsRxSamples    = (int16_t *)calloc(words, sizeof(int16_t));
+
+    if (gSdsRxSamples == NULL) {
+        sds_rx_finish("out of memory for the incoming sample", false);
+        return;
+    }
+    gSdsRxWords      = words;
+    gSdsRxGot        = 0;
+    gSdsRxRate       = (uint32_t)((1000000000.0 / (double)period) + 0.5);
+    gSdsRxHasLoop    = (d[19] != 0x7F) && (loopE > loopS);
+    gSdsRxLoopStart  = loopS;
+    gSdsRxLoopEnd    = loopE;
+    gSdsRxHaveHeader = true;
+    gSdsRxLastMs     = get_time_ms();
+    LOG_DEBUG("SDS header in: %u words, %u bits, %u Hz, loop %s\n",
+              (unsigned)words, (unsigned)d[6], (unsigned)gSdsRxRate, gSdsRxHasLoop ? "yes" : "none");
+    snprintf(gSdsRxStatus, sizeof(gSdsRxStatus), "receiving %u samples @ %u Hz",
+             (unsigned)words, (unsigned)gSdsRxRate);
+    atomic_store(&gSdsRxProgressTotal, words);
+
+    // ACK the header: that is what tells the sender to start sending packets, and it is what puts
+    // the transfer into closed loop rather than a blind dump.
+    uint8_t ack[8];
+
+    midi_send(ack, sample_dump_build_handshake(0, 0x7F, 0, ack));
+}
+
+static void sds_rx_packet(const uint8_t * d, uint32_t length) {
+    int16_t words[SDS_WORDS_PER_PACKET];
+    uint8_t number = 0;
+    uint8_t reply[8];
+
+    if (!sample_dump_decode_packet(d, length, words, &number)) {
+        // Bad checksum or framing: NAK and the sender repeats that very packet.
+        LOG_ERROR("SDS packet failed its checksum; NAKing\n");
+        midi_send(reply, sample_dump_build_handshake(0, 0x7E, number, reply));
+        return;
+    }
+
+    for (uint32_t w = 0; (w < SDS_WORDS_PER_PACKET) && (gSdsRxGot < gSdsRxWords); w++) {
+        gSdsRxSamples[gSdsRxGot++] = words[w];
+    }
+
+    gSdsRxLastMs = get_time_ms();
+    atomic_store(&gSdsRxProgressGot, gSdsRxGot);
+    midi_send(reply, sample_dump_build_handshake(0, 0x7F, number, reply));
+
+    if (gSdsRxGot >= gSdsRxWords) {
+        sds_rx_finish("complete", true);
+    }
+}
+
+static void sds_rx_frame(const tSdsRxFrameData * frame) {
+    if (!gSdsRxActive) {
+        return;
+    }
+    const uint8_t * d = frame->data;
+
+    if ((frame->length >= 21) && (d[3] == 0x01)) {
+        sds_rx_header(d);
+    } else if (d[3] == 0x02) {
+        if (gSdsRxHaveHeader) {
+            sds_rx_packet(d, frame->length);
+        }
+    }
+}
+
+static void sds_rx_tick(void) {
+    if (!gSdsRxActive) {
+        return;
+    }
+
+    // Nothing at all within the window means the sample number does not exist — the standard says a
+    // request for an out-of-range sample is simply ignored, with no reply of any kind.
+    if (!gSdsRxHaveHeader && ((get_time_ms() - gSdsRxLastMs) >= SDS_HANDSHAKE_TIMEOUT_MS)) {
+        sds_rx_finish("no reply: that sample number is probably empty", false);
+        return;
+    }
+
+    if (gSdsRxHaveHeader) {
+        bool   tailOnly = (gSdsRxWords - gSdsRxGot) < SDS_WORDS_PER_PACKET;
+        double quietFor = get_time_ms() - gSdsRxLastMs;
+
+        // Everything but a part-packet is in, and nothing more has come: that is this device's idea
+        // of finished, so take it as such rather than reporting a timeout on a good transfer.
+        if (tailOnly && (quietFor >= SDS_TAIL_GRACE_MS)) {
+            sds_rx_finish("complete", true);
+        } else if (quietFor >= SDS_ACK_TIMEOUT_MS) {
+            sds_rx_finish("the sender went quiet", true);
+        }
     }
 }
 
@@ -741,13 +1339,28 @@ static void * midi_thread(void * arg) {
         // applied before this tick's polling decisions read the state it may have just changed.
         drain_midi_commands();
 
+        // Flush gathered encoder ticks. Done here rather than in the drain so a burst arriving as
+        // several queued messages still leaves as one, and so a slow trickle still goes out promptly.
+        if (  (gRotaryAccum != 0)
+           && ((get_time_ms() - gRotaryLastSendMs) >= ROTARY_COALESCE_MS)) {
+            peptalk_send_rotary_event(gRotaryAccum);
+            atomic_fetch_add(&gRotaryMessagesOut, 1);
+            gRotaryAccum      = 0;
+            gRotaryLastSendMs = get_time_ms();
+        }
+        sds_tick();
+        sds_rx_tick();
+
         // Poll: if session open, request LCD/LED updates as needed.
         //
         // Every want-bit below is private to this thread (see their declarations). Other threads ASK
         // via midi_post_lcd_refresh(); nothing outside this loop sets or clears them, so a request
         // cannot be cleared before it was served and a reply cannot retire a request it did not
         // answer.
-        if (gSessionOpen) {
+        // A sample transfer owns the link while it runs. An LCD frame is 2205 bytes — most of a
+        // second — and interleaving one would stall the dump and blur the progress for no gain,
+        // since the screen is not what the user is watching during a transfer.
+        if (gSessionOpen && (gSdsState == sdsIdle) && !gSdsRxActive) {
             // While a dial drag is held, poll for an LCD delta on a steady
             // throttled cadence — independent of whether new encoder ticks
             // are currently being sent. This covers both a long continuous
@@ -756,7 +1369,18 @@ static void * midi_thread(void * arg) {
             // encoder value itself — that's only ever driven by dial_nudge().
             if (  gDialDragActive && !gLcdPendingOwn
                && ((get_time_ms() - gLastLcdPollMs) >= DIAL_LCD_POLL_INTERVAL_MS)) {
-                gLcdWantDelta  = true;
+                // FULL frames while the wheel is moving, not deltas.
+                //
+                // A delta describes the device's screen as it was when the device built it, and the
+                // wheel keeps moving underneath the ~700 ms it takes to arrive — so what lands is a
+                // picture of a moment that has passed, and the device then reports "nothing changed"
+                // and never corrects it. That is how the display came to show a preset the hardware
+                // never displayed at all (P099, owner-confirmed absent from the device).
+                //
+                // It costs nothing to be right here: measured mid-burst, deltas took 516-1001 ms
+                // against a flat 715 ms for a whole frame. The cheap option was not cheaper, only
+                // wrong.
+                gLcdWantFull   = true;
                 gLastLcdPollMs = get_time_ms();
             }
 
@@ -765,6 +1389,17 @@ static void * midi_thread(void * arg) {
             // bounds that to LCD_RESYNC_IDLE_MS without ever putting a ~705 ms full frame in front
             // of a user who is still pressing keys. Deliberately skipped while a dial drag is held
             // — that path is a continuous stream of deltas and is quiet only once the drag ends.
+            // Keep asking even when we believe we are in sync: the device never reports front-panel
+            // activity, so polling is the only way to see it. Cheap, because an unchanged screen
+            // answers in 61 ms — see LCD_IDLE_PROBE_MS.
+            if (  gLcdBaseTrusted && !gLcdPendingOwn && !gDialDragActive
+               && !gLcdWantFull && !gLcdWantDelta
+               && ((get_time_ms() - gLastUiEventMs) >= LCD_RESYNC_IDLE_MS)
+               && ((get_time_ms() - gLcdLastProbeMs) >= LCD_IDLE_PROBE_MS)) {
+                gLcdWantDelta   = true;
+                gLcdLastProbeMs = get_time_ms();
+            }
+
             if (  !gLcdBaseTrusted && !gLcdPendingOwn && !gDialDragActive
                && !gLcdWantFull && !gLcdWantDelta
                && ((get_time_ms() - gLcdLastDeltaMs) >= LCD_RESYNC_IDLE_MS)) {
@@ -791,17 +1426,22 @@ static void * midi_thread(void * arg) {
             if (  !gLcdSettledOwn && !gLcdPendingOwn && !gDialDragActive
                && !gLcdWantFull && !gLcdWantDelta
                && ((get_time_ms() - gLastUiEventMs) >= LCD_SETTLE_MS)) {
-                gLcdWantDelta  = true;
+                // A full frame, not a delta, when the burst overlapped a transfer: that is the one
+                // case where the delta stream cannot be trusted to have kept up, and the user has
+                // just stopped, so it is the cheapest possible moment to spend ~715 ms putting the
+                // picture beyond doubt.
+                // A FULL frame, not a delta. The device answers a post-burst delta with "nothing
+                // changed" even when our copy is hundreds of bytes wrong (measured: a 79-byte delta
+                // immediately before a full frame reporting 377 of 1920 wrong), so a delta here
+                // cannot detect the very drift this request exists to catch. Only a whole frame can.
+                gLcdWantFull   = true;
                 gLcdSettledOwn = true;
             }
 
-            // The LED request shares the link with the LCD transfer, so it waits its turn too —
-            // firing one mid-transfer only lengthens the round trip everything else is queued behind.
-            if (gLcdWantLeds && !gLcdPendingOwn) {
-                extern void peptalk_send_led_state_request(void);
-                gLcdWantLeds = false;
-                peptalk_send_led_state_request();
-            } else if (!gLcdPendingOwn) {
+            // The display outranks the LEDs. They share one 31250-baud link, so an LED request sent
+            // ahead of a pending screen update simply delays the thing the user is looking at; it
+            // goes out only when there is no display work waiting.
+            if (!gLcdPendingOwn) {
                 extern void peptalk_send_lcd_dump_request(void);
                 extern void peptalk_send_lcd_delta_request(void);
                 extern uint8_t peptalk_last_request_seq(void);
@@ -809,11 +1449,20 @@ static void * midi_thread(void * arg) {
                 // Marked pending BEFORE sending, so a reply that arrives while we are still in this
                 // block cannot be mistaken for there being nothing outstanding.
                 if (gLcdWantFull || gLcdWantDelta) {
-                    bool full = gLcdWantFull;
+                    // A probe is worth it only when nothing has moved for a while: that is where
+                    // "unchanged" is the likely answer and it costs 61 ms instead of 715.
+                    bool idle  = (get_time_ms() - gLastUiEventMs) >= LCD_RESYNC_IDLE_MS;
+                    bool probe = LCD_PROBE_WHEN_IDLE && !gLcdWantFull && gLcdBaseTrusted
+                                 && !gDialDragActive && idle;
+                    bool full  = !probe;
+
+                    atomic_store(&gLcdProbeInFlight, probe);
 
                     gLcdWantFull   = false;
-                    gLcdWantDelta  = false;   // a full frame answers a pending delta too
+                    gLcdWantDelta  = false;          // a full frame answers a pending delta too
                     gLcdReqMsOwn   = get_time_ms();
+                    gLcdReqUiStamp = gLastUiEventMs; // to spot the screen moving during the transfer
+                    atomic_store(&gLcdReqUiStampSeen, gLcdReqUiStamp);
                     gLcdPendingOwn = true;
                     gLcdInFlightOwn++;
 
@@ -824,12 +1473,21 @@ static void * midi_thread(void * arg) {
                     }
                     atomic_store(&gLcdOutstandingSeq, peptalk_last_request_seq());
                     atomic_store(&gLcdOutstandingValid, true);
+                } else if (gLcdWantLeds) {
+                    extern void peptalk_send_led_state_request(void);
+                    gLcdWantLeds = false;
+                    peptalk_send_led_state_request();
                 }
             }
         }
         // Drive this thread's CFRunLoop so the midi_notify_cb fires here.
         // Use a short interval when work is in progress, idle at ~30 Hz otherwise.
-        bool   busy    = gLcdPendingOwn
+        // A transfer wants the fast tick throughout: every packet waits on this loop to come round
+        // and acknowledge it, so an idle 33 ms tick would be added to the cost of all several
+        // hundred of them.
+        bool   busy    = (gSdsState != sdsIdle)
+                         || gSdsRxActive
+                         || gLcdPendingOwn
                          || gLcdWantFull
                          || gLcdWantDelta
                          || gDialDragActive;

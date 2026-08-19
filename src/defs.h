@@ -68,7 +68,15 @@
 // overruns the frame re-bases immediately (see peptalk_apply_lcd_delta) — so this timer only covers
 // the case of a delta that was never delivered at all.
 //
-// Raised 5000 -> 20000 on 2026-08-20. A resync cannot be recalled once its request is on the wire,
+// Raised 5000 -> 20000, then cut back to 4000 the same day once it was PROVEN that this timer is
+// the only thing that heals a diverged display. Captured live: the painted framebuffer and the pixel
+// buffer were the identical wrong picture, so the renderer is faithful and the buffer really had
+// drifted — and the delta immediately before showed 79 bytes, "nothing changed", while the next full
+// frame reported 377 of 1920 bytes wrong. The device believes we are in sync when we are not, so
+// deltas cannot reveal the drift and this timer is the cure, not insurance. Twenty seconds of a
+// visibly wrong preset is far worse than one press occasionally queueing behind a 715 ms frame.
+//
+// Originally raised because A resync cannot be recalled once its request is on the wire,
 // so if the user resumes inside the ~715 ms it takes, their input queues behind it: the hardware
 // moves on and the screen catches up a beat later. A five-second pause is a normal part of using the
 // thing, so that collision was reachable. Twenty seconds is a genuine walk-away.
@@ -78,7 +86,58 @@
 // fixed (foreign MIDI splicing into the reassembly buffer, replies mispaired with requests, the
 // request state machine racing between two threads), and a delta that overruns the frame already
 // forces an immediate re-base. This is now genuine insurance rather than routine maintenance.
-#define LCD_RESYNC_IDLE_MS    (20000.0)
+// Deltas are no longer used at all — see LCD_USE_DELTAS. This remains as the idle re-read interval.
+#define LCD_RESYNC_IDLE_MS    (4000.0)
+
+// Whether to use the protocol's delta (XOR) refresh at all. OFF, deliberately.
+//
+// The delta mechanism cannot be made reliable against this device, and the attempts are recorded
+// here so they are not repeated:
+//   * a delta describes the device's screen when the DEVICE built it, ~700 ms before it arrives;
+//   * the device then reports "nothing changed" (79-byte reply) while our copy is measurably
+//     hundreds of bytes wrong, so a delta can never REVEAL the drift it caused;
+//   * deltas are computed against "what I last sent you", so discarding a stale one — which is
+//     necessary to avoid painting an old screen — desynchronises that base and corrupts every
+//     delta after it. Measured live: a full frame corrected 346 bytes, the next delta put the same
+//     346 bytes back.
+//
+// And it buys nothing. Timed on real hardware, a delta carrying an actual change took 446-1001 ms
+// against a flat ~715 ms for a whole frame. The only fast delta is the 61 ms "nothing changed" one,
+// which is exactly the case where its answer cannot be trusted.
+//
+// Whole frames are ~1.4 per second and always correct. If this is ever revisited, the thing to fix
+// first is the base-tracking, not the speed.
+#define LCD_USE_DELTAS    (0)
+
+// Deltas ARE still worth having, but only as a change DETECTOR, and only while nothing is moving.
+//
+// Every failure above came from applying delta CONTENT. Used purely to answer "has anything changed
+// since you last told me?", none of it applies: the payload is thrown away, so it cannot corrupt the
+// frame, and the base cannot drift because we only ever probe from a state a whole frame has just
+// verified. If the answer is yes, a whole frame is fetched and THAT is what gets shown.
+//
+// The economics are the point. An unchanged screen answers in 61 ms against ~715 ms for a frame, so
+// idling costs a tenth of what polling whole frames would, and a change made on the sampler's own
+// front panel is still noticed within one poll. A changed screen costs 61 + 715, slightly worse than
+// a frame alone — which is why this is used only when idle, where "unchanged" is the overwhelmingly
+// common answer, and never during input, where whole frames go out directly.
+#define LCD_PROBE_WHEN_IDLE    (1)
+
+// How often to probe while idle.
+//
+// This is not optional politeness — it is the ONLY way we learn about anything done on the sampler's
+// own front panel. Message types actually received from the device are 0x50 (LCD reply), 0x61 (LED
+// reply) and 0x7F (session status); the first two only ever answer a request, and no button (0x40)
+// or rotary (0x43) echo has EVER arrived. The device simply does not volunteer that its screen
+// changed, so without polling, turning a knob on the unit itself would leave our display wrong
+// indefinitely.
+//
+// At 61 ms per probe, 250 ms costs about a quarter of the link while idle and surfaces a front-panel
+// change within about a quarter of a second — the difference between the mirror feeling live and
+// feeling polled. Nothing is competing for the wire at that point: whole frames only go out when
+// something actually changed, and the entire LCD block is skipped while a sample transfer owns the
+// link (see the gSdsState / gSdsRxActive gate in midi_thread), so a dump is never slowed by this.
+#define LCD_IDLE_PROBE_MS    (250.0)
 
 // How long an LCD request may stay in flight before it is written off. gLcdPending exists to keep
 // one request on the wire at a time, but nothing ever cleared it except a reply — so a single lost
@@ -108,6 +167,76 @@
 // Comfortably past the device's own turnaround (~130 ms fixed overhead, measured), while still
 // feeling immediate. Costs one small delta (~200 ms) per burst, not per event.
 #define LCD_SETTLE_MS    (250.0)
+
+// How many times in a row the display may be re-read purely because the LAST read showed it moving.
+//
+// Input stops, but the DEVICE does not: it is still working through the button events already sent,
+// and its screen keeps changing for a while afterwards. One trailing refresh samples that backlog
+// mid-flight and then nothing asks again, which is how the screen ends up a whole preset behind and
+// stays there — measured as 35 of 64 rows wrong at the settle point, corrected only by the next
+// manual full dump. So a refresh that comes back CHANGED asks once more, until one comes back empty:
+// "nothing has changed since you last asked" is the device telling us it has caught up.
+//
+// Capped because some screens move on their own — a meter, anything animated — and chasing one of
+// those would poll the link forever. Hitting the cap simply stops until the next input or the idle
+// resync, which is the right way to lose this race.
+#define LCD_CHASE_MAX    (8)
+
+// How long encoder ticks are gathered up before being sent as ONE event.
+//
+// A mouse drag produces a tick per cursor move — dozens a second — and each is a separate PEPTALK
+// message the device must act on, redrawing its screen every time. That is what makes a drag bursty,
+// and a screen changing under a ~700 ms transfer is precisely what puts the delta stream out of step.
+// The wheel is a relative control, so N ticks of +1 and one tick of +N are the same instruction: the
+// device lands on the same preset either way, having redrawn once instead of N times.
+//
+// Deliberately short. Long enough to collapse a flurry of mouse-move ticks, far too short to be felt
+// as lag on the control itself.
+#define ROTARY_COALESCE_MS    (40.0)
+
+// ── Sample Dump Standard transfer ────────────────────────────────────────────
+// How long to wait after the DUMP HEADER before concluding nobody is handshaking. The standard sets
+// this at two seconds: the receiver needs that long to decide whether it has the memory, and if
+// nothing comes back the sender must assume an open loop and dump regardless.
+#define SDS_HANDSHAKE_TIMEOUT_MS    (2500.0)
+
+// Open-loop pacing. With no acknowledgements there is nothing to pace against, and CoreMIDI would
+// happily accept thousands of packets we cannot possibly have sent yet. A 127-byte packet occupies
+// 127 * 10 / 31250 = 40.6 ms of wire, so this sends just slower than the link drains. Closed loop
+// needs none of this — the ACK is the pacing.
+#define SDS_OPEN_LOOP_PACE_MS    (45.0)
+
+// How long to wait for an acknowledgement before giving up on the whole transfer. Generous: the
+// receiver is entitled to send WAIT and go off to do housekeeping for a while.
+#define SDS_ACK_TIMEOUT_MS    (30000.0)
+
+// Grace period once only a PARTIAL packet's worth of the declared length is still outstanding.
+//
+// A real E5000 declares its length in words but sends only whole packets: asked for a 13681-word
+// sample it sent 342 packets — 13680 words — and stopped, one word short of its own header. Waiting
+// out SDS_ACK_TIMEOUT_MS for a packet that is never coming wastes half a minute and reports failure
+// for a transfer that actually succeeded, so the tail gets a short grace instead.
+#define SDS_TAIL_GRACE_MS    (2500.0)
+
+// Extra words appended to every outgoing sample to absorb what this sampler discards.
+//
+// An E5000 stores THREE FEWER samples than it is sent, every time. Measured 2026-08-20 by sending
+// ramps with a unique value per sample and reading the device's own Sample Manage > Info page:
+//   sent 400  -> "Length: 397 samples"
+//   sent 2000 -> "Length: 1997 samples"
+//   sent 4000 -> "Length: 3997 samples"
+// Constant across a tenfold length range and across 26000 and 44100 Hz, and the surviving audio is
+// contiguous — so it is a fixed edge effect, not a proportional loss and not a dropout.
+//
+// Compensated by padding the tail, so the three the device throws away are padding rather than the
+// end of the sample. The pad repeats the final sample value rather than using zero: a sample ending
+// away from zero would otherwise get a step discontinuity — a click — welded onto its end.
+//
+// Only the tail is fixable. Reading a sample BACK loses one sample off the FRONT (and the device
+// pads the length up to a multiple of 40 with 0x8000 words), which nothing at this end can recover,
+// since we cannot ask it to start earlier. At 26-44 kHz that is 23-38 microseconds.
+#define SDS_EMU_TAIL_PAD    (3)
+
 
 // ── Computer-keyboard note entry ─────────────────────────────────────────────
 // Notes go out as ordinary MIDI, not PEPTALK: PEPTALK drives the front panel, and a note is not a

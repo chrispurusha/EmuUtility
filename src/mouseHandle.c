@@ -111,6 +111,49 @@ void dial_press_click_handler(tCoord coord, eClickPhase phase, void * userData) 
     }
 }
 
+// Ends a dial drag. The real mouse release calls this, and so does recover_lost_dial_drag() when the
+// release never arrived — one place, so the two cannot drift apart.
+//
+// No explicit glfwSetCursorPos() here: GLFW's cocoa backend already restores the cursor to wherever
+// it was when CURSOR_DISABLED was entered, as soon as we switch back to NORMAL, and two independent
+// warps in a row can land a pixel or two apart (same fix as SynthEdit's mouseHandle.c).
+static void end_dial_drag(void * win) {
+    // The dial's own press was dispatched through the click registry, so it captured (see
+    // eClickPhase in clickRegion.h). This path consumes the release without reaching
+    // dispatch_click_region(), so drop that capture explicitly — otherwise it stays armed and the
+    // next release to land on empty space would be delivered to the dial handler.
+    cancel_click_region_capture();
+    gDialDrag       = false;
+    gDialSkipCount  = 0;
+
+    if (synthlib_dial_mode() != eDialModeRotary) {
+        glfwSetInputMode((GLFWwindow *)win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
+    gDialDragActive = false;
+    midi_post_lcd_refresh(true);   // final full sync supersedes the throttled polling during the drag
+    synthlib_request_redraw();
+}
+
+// A drag whose release never arrived — button came up outside the window, focus lost mid-gesture —
+// used to leave gDialDragActive set FOREVER. That is worse than a stuck cursor: the MIDI thread
+// gates BOTH of its corrective refreshes on the drag being over (the settle, and the idle resync),
+// so a stuck flag disables both and the display stays wrong indefinitely, while a delta is requested
+// every 120 ms for a drag that ended long ago.
+//
+// Called every frame from the render loop; a no-op unless the flag really is stuck. G2-Edit does the
+// same with recover_lost_cursor() — this app had no equivalent.
+void recover_lost_dial_drag(void * win) {
+    if (!gDialDrag) {
+        return;
+    }
+
+    if (glfwGetMouseButton((GLFWwindow *)win, 0) == 1) {   // left button genuinely still held
+        return;
+    }
+    LOG_DEBUG("Recovering a dial drag whose release never arrived\n");
+    end_dial_drag(win);
+}
+
 void handle_mouse_button(void * win, int button, int action, int mods, double x, double y) {
     (void)mods;
 
@@ -137,20 +180,7 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     // land a pixel or two off from each other. Harmless there in practice
     // since there's only the one dial on screen, but no reason to keep it.
     if (!pressed && gDialDrag) {
-        // The dial's own press was dispatched through the click registry, so it captured (see
-        // eClickPhase in clickRegion.h). This path consumes the release without reaching
-        // dispatch_click_region(), so drop that capture explicitly — otherwise it stays armed and
-        // the next release to land on empty space would be delivered to the dial handler.
-        cancel_click_region_capture();
-        gDialDrag       = false;
-        gDialSkipCount  = 0;
-
-        if (synthlib_dial_mode() != eDialModeRotary) {
-            glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-        }
-        gDialDragActive = false;
-        midi_post_lcd_refresh(true); // final full sync supersedes the throttled polling done during the drag
-        synthlib_request_redraw();
+        end_dial_drag(win);
         return;
     }
 

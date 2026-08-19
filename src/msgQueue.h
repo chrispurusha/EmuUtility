@@ -22,6 +22,7 @@
 
 #include "sysIncludes.h"
 #include "types.h"
+#include "sampleDump.h"
 #include "synthlibQueue.h" // generic queue mechanism: tMessageQueue / eRcv / msg_init / msg_send / ...
 
 // gToMidiThread is the MIDI thread's command queue. Every other thread (the UI/render thread, the
@@ -47,7 +48,12 @@ typedef enum {
     eMsgCmdNoteEvent,      // noteEventData: a MIDI note from the computer-keyboard note entry
     eMsgCmdLcdRefresh,     // lcdRefreshData: somebody wants the display re-read
     eMsgCmdLcdReply,       // lcdReplyData: a reply landed; only the MIDI thread may act on that
-    eMsgCmdUiActivity      // the user touched something; starts the settle timer
+    eMsgCmdUiActivity,     // the user touched something; starts the settle timer
+    eMsgCmdSdsStart,       // sdsStartData: begin a Sample Dump Standard transfer to the device
+    eMsgCmdSdsHandshake,   // sdsHandshakeData: the receiver answered ACK/NAK/WAIT/CANCEL
+    eMsgCmdSdsCancel,      // abandon the transfer in progress
+    eMsgCmdSdsRequest,     // sdsRequestData: ask the device to send us a sample (non-destructive)
+    eMsgCmdSdsRxFrame      // sdsRxFrameData: a dump header or data packet arrived from the device
 } eMsgCmd;
 
 // Posted by the CoreMIDI read callback, acted on by the MIDI thread: the callback only validates and
@@ -88,11 +94,37 @@ typedef struct {
 // writing the pixels. Everything the reply implies for the REQUEST state (what is still in flight,
 // whether another transfer is owed) is decided by the MIDI thread from this message, because that
 // thread owns it. Mirrors how tIdentityReplyData splits the same way.
+// Ownership of dump.samples MOVES to the MIDI thread with this message: it is the thread that will
+// spend the next several minutes reading it, and the only one that knows when it is finished.
+typedef struct {
+    tSampleDump dump;
+    uint16_t    sampleNumber;
+    uint8_t     channel;
+} tSdsStartData;
+
+typedef struct {
+    uint8_t type;      // 0x7F ACK, 0x7E NAK, 0x7D CANCEL, 0x7C WAIT
+    uint8_t packet;
+} tSdsHandshakeData;
+
+typedef struct {
+    uint16_t sampleNumber;
+    char     path[400];     // where to write the .wav once it has all arrived
+} tSdsRequestData;
+
+// The raw frame, handed over whole: verifying the checksum and deciding whether to ACK or NAK is the
+// MIDI thread's business, because it owns the transfer state and is the only thread that may send.
+typedef struct {
+    uint32_t length;
+    uint8_t  data[132];
+} tSdsRxFrameData;
+
 typedef struct {
     uint8_t seq;             // the sequence id the reply carried
     bool    stale;           // did not match the outstanding request; pixels untouched
     bool    wasFullFrame;    // a whole frame, so the delta stream is re-based
     bool    needsFullFrame;  // the payload was unusable; only a full frame can put it right
+    bool    changed;         // the display actually moved; the device may still have more to show
 } tLcdReplyData;
 
 typedef struct {
@@ -104,6 +136,10 @@ typedef struct {
         tNoteEventData     noteEventData;
         tLcdRefreshData    lcdRefreshData;
         tLcdReplyData      lcdReplyData;
+        tSdsStartData      sdsStartData;
+        tSdsHandshakeData  sdsHandshakeData;
+        tSdsRequestData    sdsRequestData;
+        tSdsRxFrameData    sdsRxFrameData;
     };
 } tMessageContent;
 
