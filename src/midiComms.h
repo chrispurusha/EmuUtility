@@ -115,6 +115,12 @@ bool midi_lcd_reply_describes_stale_screen(void);
 // changed, whose content must not be applied. See LCD_PROBE_WHEN_IDLE.
 bool midi_lcd_probe_in_flight(void);
 
+// How long to let the device finish redrawing after an input before asking what its screen now says.
+// Runtime-settable purely so the right value can be MEASURED rather than guessed; 0 disables the
+// wait. See LCD_PRESS_SETTLE_MS.
+void midi_set_press_settle_ms(double ms);
+double midi_press_settle_ms(void);
+
 // Has the display stopped moving? True when nothing is on the wire, nothing is wanted, and the last
 // reply came back reporting no change — i.e. the device itself has said "nothing has changed since
 // you last asked". This is the only sound moment to compare our frame against a fetched one: before

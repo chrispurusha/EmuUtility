@@ -91,8 +91,29 @@
 
 // Whether to use the protocol's delta (XOR) refresh at all. OFF, deliberately.
 //
-// The delta mechanism cannot be made reliable against this device, and the attempts are recorded
-// here so they are not repeated:
+// Delta CONTENT is never displayed. Deltas are used only as a change detector (LCD_PROBE_WHEN_IDLE),
+// and whole frames are the only thing allowed to decide what is on screen.
+//
+// This is not conservatism, it is arithmetic. A delta is an XOR against "what I last sent you", and
+// the device advances that reference whenever it sends one — including for a probe, whose payload we
+// deliberately discard, and including for a reply the stale-guard throws away. Once the reference has
+// moved and our buffer has not, the next delta computes as A^B and applying it to B yields exactly A:
+// the OLD value, restored perfectly. That is the "old, new, old, new" bounce, and it is why deltas
+// and probes cannot both be used: any discarded delta poisons every delta after it.
+//
+// The cost of giving this up is small and was measured: a delta carrying a real change took 446-1001
+// ms against a flat ~715 ms for a whole frame, so displaying deltas was never much faster. The one
+// genuinely cheap case, the 61 ms "nothing changed" reply, is retained — as a signal, not as data.
+//
+// That line is drawn where the evidence puts it. A delta describes the device's screen as it was
+// when the device built it, ~700 ms before it arrives, so the hazard is a SECOND change overtaking
+// the first. One button press is a single change that then settles, and the delta is both safe and
+// three times cheaper: 200-270 ms against ~715 ms for a whole frame. A dial drag or a held Inc is a
+// stream of changes, where the delta lands describing a moment that has passed — measured putting a
+// preset on screen that the hardware never displayed at all.
+//
+// The failures below all came from using deltas for the STREAMING case, and are recorded so the
+// attempts are not repeated:
 //   * a delta describes the device's screen when the DEVICE built it, ~700 ms before it arrives;
 //   * the device then reports "nothing changed" (79-byte reply) while our copy is measurably
 //     hundreds of bytes wrong, so a delta can never REVEAL the drift it caused;
@@ -132,12 +153,36 @@
 // changed, so without polling, turning a knob on the unit itself would leave our display wrong
 // indefinitely.
 //
-// At 61 ms per probe, 250 ms costs about a quarter of the link while idle and surfaces a front-panel
-// change within about a quarter of a second — the difference between the mirror feeling live and
-// feeling polled. Nothing is competing for the wire at that point: whole frames only go out when
+// This doubles as the DEBOUNCE. The clock is restarted by every input and by every reply, so a probe
+// can only ever fire once things have been quiet for this long — which is why the probe needs no
+// separate "am I idle" test. During a burst, inputs arrive closer together than this and no probe
+// goes out at all; the moment you stop, polling resumes within 150 ms.
+//
+// At 61 ms per probe that is roughly 40% of the link while genuinely idle, which costs nothing since
+// nothing else wants it then, and it surfaces a front-panel change in about a sixth of a second. Nothing is competing for the wire at that point: whole frames only go out when
 // something actually changed, and the entire LCD block is skipped while a sample transfer owns the
 // link (see the gSdsState / gSdsRxActive gate in midi_thread), so a dump is never slowed by this.
-#define LCD_IDLE_PROBE_MS    (250.0)
+#define LCD_IDLE_PROBE_MS    (150.0)
+
+// Two input events closer together than this mean the user is STREAMING — holding Inc, or working
+// the dial — rather than making one discrete change.
+//
+// This is the real distinction, and it is about timing rather than which control was used: an
+// isolated Inc press is as safe for a delta as a function key, while a rapid run of them is exactly
+// the case where a delta lands describing a screen that has already moved on. Whole frames are used
+// while streaming, deltas otherwise.
+#define LCD_STREAM_GAP_MS    (400.0)
+
+// How long to wait after an input before asking the device what its screen now shows.
+//
+// We send the button event and the refresh request back to back, microseconds apart, and rely on the
+// sampler servicing them in order. In-order servicing guarantees the redraw STARTS first; it does not
+// guarantee the redraw has FINISHED when the device snapshots the screen for our reply. If it has
+// not, we get a half-drawn frame — which would look exactly like brief corruption.
+//
+// Default 0 until measured. midi_set_press_settle_ms() makes it settable at runtime so the sweep can
+// decide the value rather than intuition.
+#define LCD_PRESS_SETTLE_MS    (0.0)
 
 // How long an LCD request may stay in flight before it is written off. gLcdPending exists to keep
 // one request on the wire at a time, but nothing ever cleared it except a reply — so a single lost

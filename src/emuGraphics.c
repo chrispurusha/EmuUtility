@@ -385,7 +385,14 @@ void emu_button_press(tButtonKey key, bool pressed) {
     LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
     btn->pressed = pressed;
     midi_post_button_event(btn->key, pressed);
-    midi_note_ui_activity();   // so one trailing delta lands after the burst; see LCD_SETTLE_MS
+
+    // Only the PRESS counts as activity. The release is the tail of the same gesture and changes
+    // nothing further, but stamping it restarts the settle timer AND makes every reply in flight
+    // look superseded — which quietly forced a whole frame for every button press, defeating the
+    // cheap delta this split exists to use.
+    if (pressed) {
+        midi_note_ui_activity();
+    }
     // A DELTA, not a full dump. A full frame is 2205 bytes on a 31250-baud DIN link — measured at
     // 714-874 ms per press on a real E5000 — where the delta for a typical change is 377 bytes and
     // 256 ms. Even a whole-page change is no worse: the device simply answers with the whole frame
@@ -396,6 +403,9 @@ void emu_button_press(tButtonKey key, bool pressed) {
     // risk is not new here — the dial drag has always driven an unbounded stream of them — and it
     // is answered directly by the idle resync in midi_thread(), which re-bases the frame once the
     // display has been quiet for LCD_RESYNC_IDLE_MS. See globalVars.h (gLcdBaseTrusted).
+    // Always ask for a delta; whether one is actually safe is a question of TIMING, not of which
+    // button was pressed, and the MIDI thread decides that from the gap between input events. An
+    // isolated Inc is as safe as a function key; a rapid run of either is not. See LCD_STREAM_GAP_MS.
     midi_post_lcd_refresh(false);
     synthlib_request_redraw();
 }

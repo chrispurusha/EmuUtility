@@ -542,6 +542,8 @@ static void backdoor_dump_state(char * out, size_t outMax) {
     // a whole run of measurements on 2026-08-20; reporting the pid makes the cross-talk detectable.
     used += (size_t)snprintf(out + used, outMax - used, "pid=%d\n", (int)getpid());
 
+    used += (size_t)snprintf(out + used, outMax - used, "pressSettleMs=%.0f\n", midi_press_settle_ms());
+
     used += (size_t)snprintf(out + used, outMax - used, "lcdQuiet=%s\n",
                              midi_lcd_is_quiet() ? "yes" : "no");
 
@@ -853,6 +855,15 @@ static void backdoor_dispatch(const char * cmd, const char * arg, GLFWwindow * w
         backdoor_write_result(text);
     } else if (strcmp(cmd, "SDSCANCEL") == 0) {
         midi_post_sds_cancel();
+        backdoor_write_result("OK\n");
+    } else if (strcmp(cmd, "PRESSDELAY") == 0) {
+        double ms = -1.0;
+
+        if ((sscanf(arg, "%lf", &ms) != 1) || (ms < 0.0) || (ms > 1000.0)) {
+            backdoor_write_result("ERROR: expected 'PRESSDELAY <0-1000 ms>'\n");
+            return;
+        }
+        midi_set_press_settle_ms(ms);
         backdoor_write_result("OK\n");
     } else if (strcmp(cmd, "REFRESH") == 0) {
         midi_post_lcd_refresh(true);

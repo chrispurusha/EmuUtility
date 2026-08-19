@@ -327,7 +327,7 @@ void handle_key(void * win, int key, int scancode, int action, int mods) {
     if (found) {
         midi_post_button_event(bk, true);
         midi_post_button_event(bk, false);
-        midi_post_lcd_refresh(false);   // a delta, for the reasons emu_button_press() gives
+        midi_post_lcd_refresh(false);   // timing decides whether a delta is safe; see emu_button_press()
         midi_note_ui_activity();
         synthlib_request_redraw();
     }

@@ -151,6 +151,11 @@ static _Atomic double   gLcdReqUiStampSeen   = 0.0;
 // moved. Its content is deliberately discarded — see LCD_PROBE_WHEN_IDLE.
 static _Atomic bool     gLcdProbeInFlight    = false;
 static double           gLcdLastProbeMs      = 0.0;
+
+// How long passed between the last two input events. Small means the user is working a control
+// continuously rather than making one change — see LCD_STREAM_GAP_MS.
+static _Atomic double   gLastUiGapMs         = 1.0e9;
+static _Atomic double   gPressSettleMs       = LCD_PRESS_SETTLE_MS;
 static bool             gLcdDeltaSuspect     = false;
 
 // Read by the CoreMIDI callback for its staleness check, so these must be atomic — but this thread
@@ -195,6 +200,14 @@ bool midi_lcd_is_quiet(void) {
 //
 // Better to keep showing the last frame we believed than to paint a stale one. The caller asks
 // again, and the next reply — taken after the movement — is correct.
+void midi_set_press_settle_ms(double ms) {
+    atomic_store(&gPressSettleMs, ms);
+}
+
+double midi_press_settle_ms(void) {
+    return atomic_load(&gPressSettleMs);
+}
+
 bool midi_lcd_probe_in_flight(void) {
     return atomic_load(&gLcdProbeInFlight);
 }
@@ -685,8 +698,12 @@ void midi_post_note_event(uint8_t note, uint8_t velocity, bool on) {
 
 void midi_note_ui_activity(void) {
     tMessageContent msg = {0};
+    double          now = get_time_ms();
 
-    gLastUiEventMs = get_time_ms();   // UI threads are its only writer; the MIDI thread only reads it
+    // The gap since the previous event is what says whether this is one discrete change or part of a
+    // stream — see LCD_STREAM_GAP_MS. Computed here because UI threads are the only writers of these.
+    atomic_store(&gLastUiGapMs, now - gLastUiEventMs);
+    gLastUiEventMs = now;             // UI threads are its only writer; the MIDI thread only reads it
     msg.cmd        = eMsgCmdUiActivity;
     post_to_midi_thread(&msg);
 }
@@ -880,16 +897,33 @@ static void drain_midi_commands(void) {
                 if (msg.lcdReplyData.needsFullFrame) {
                     gLcdWantFull = true;
                 }
+                // Any reply — probe, delta or whole frame — says what the screen shows right now, so
+                // the idle poll has nothing to add for another interval. Counting from the reply
+                // rather than from the last probe also stops requests bunching up behind a slow frame.
+                gLcdLastProbeMs = get_time_ms();
+
+                bool wasProbe = atomic_load(&gLcdProbeInFlight);
 
                 // A probe reported movement: it told us THAT, never what. Fetch a whole frame, which
                 // is the only thing allowed to change what is displayed.
-                if (atomic_load(&gLcdProbeInFlight)) {
+                if (wasProbe) {
                     atomic_store(&gLcdProbeInFlight, false);
 
                     if (msg.lcdReplyData.changed) {
                         LOG_DEBUG("Probe saw the screen move; fetching a whole frame\n");
                         gLcdWantFull = true;
                     }
+                }
+
+                // A delta was just applied, so the screen is already showing the new state — that is
+                // the fast part, ~200 ms rather than ~715. Chase it immediately with a whole frame
+                // rather than waiting for the idle resync: the delta bought the perceived latency,
+                // and the frame behind it confirms the picture is actually right. Waiting up to
+                // LCD_RESYNC_IDLE_MS instead meant a delta that had drifted stayed on screen for
+                // seconds, which is exactly the fault this whole exercise started with.
+                if (  !msg.lcdReplyData.stale && !msg.lcdReplyData.wasFullFrame && !wasProbe
+                   && msg.lcdReplyData.changed) {
+                    gLcdWantFull = true;
                 }
 
                 // Did the user act while this was in flight? Then this delta describes a screen that
@@ -958,6 +992,12 @@ static void drain_midi_commands(void) {
                 gLcdLastReplyChanged = true; // input means the screen is presumed moving again
                 gLcdSettledOwn       = false;
                 gLcdChaseCount       = 0;    // fresh input, so the chase allowance starts over
+
+                // Restart the idle-poll clock too. A press already triggers its own refresh, so
+                // letting the probe fire straight afterwards spends a round trip asking a question
+                // we are in the middle of answering — and on a link this slow that queues behind the
+                // very update the user is waiting for.
+                gLcdLastProbeMs      = get_time_ms();
                 break;
 
             case eMsgCmdNoteEvent:
@@ -1392,9 +1432,12 @@ static void * midi_thread(void * arg) {
             // Keep asking even when we believe we are in sync: the device never reports front-panel
             // activity, so polling is the only way to see it. Cheap, because an unchanged screen
             // answers in 61 ms — see LCD_IDLE_PROBE_MS.
+            // No separate idle test: gLcdLastProbeMs is restarted by every input and every reply, so
+            // this interval IS the debounce. Borrowing the resync's 4 s here meant a front-panel
+            // change made shortly after touching the app went unseen for up to four seconds — and
+            // the probe is the ONLY channel by which such a change reaches us.
             if (  gLcdBaseTrusted && !gLcdPendingOwn && !gDialDragActive
                && !gLcdWantFull && !gLcdWantDelta
-               && ((get_time_ms() - gLastUiEventMs) >= LCD_RESYNC_IDLE_MS)
                && ((get_time_ms() - gLcdLastProbeMs) >= LCD_IDLE_PROBE_MS)) {
                 gLcdWantDelta   = true;
                 gLcdLastProbeMs = get_time_ms();
@@ -1430,11 +1473,13 @@ static void * midi_thread(void * arg) {
                 // case where the delta stream cannot be trusted to have kept up, and the user has
                 // just stopped, so it is the cheapest possible moment to spend ~715 ms putting the
                 // picture beyond doubt.
-                // A FULL frame, not a delta. The device answers a post-burst delta with "nothing
-                // changed" even when our copy is hundreds of bytes wrong (measured: a 79-byte delta
-                // immediately before a full frame reporting 377 of 1920 wrong), so a delta here
-                // cannot detect the very drift this request exists to catch. Only a whole frame can.
-                gLcdWantFull   = true;
+                // A delta suffices here now that deltas are only applied for discrete events: the
+                // trailing read just needs to catch the settled result. Drift is handled separately
+                // and properly — applying any delta marks the base untrusted, and the resync then
+                // fetches a whole frame once things have been quiet for LCD_RESYNC_IDLE_MS. That is
+                // the "let the full refresh clean up" arrangement, with the delta never allowed to
+                // be the thing that decides what is displayed for long.
+                gLcdWantDelta  = true;
                 gLcdSettledOwn = true;
             }
 
@@ -1448,13 +1493,26 @@ static void * midi_thread(void * arg) {
 
                 // Marked pending BEFORE sending, so a reply that arrives while we are still in this
                 // block cannot be mistaken for there being nothing outstanding.
-                if (gLcdWantFull || gLcdWantDelta) {
+                // Give the device a moment to finish redrawing before asking what it now shows.
+                // Only applies to the discrete case: a probe has no input to wait for, and while
+                // streaming there is no settled state to wait for either.
+                double settle  = atomic_load(&gPressSettleMs);
+                bool   tooSoon = (settle > 0.0) && !gLcdWantFull
+                                 && ((get_time_ms() - gLastUiEventMs) < settle);
+
+                if ((gLcdWantFull || gLcdWantDelta) && !tooSoon) {
                     // A probe is worth it only when nothing has moved for a while: that is where
                     // "unchanged" is the likely answer and it costs 61 ms instead of 715.
-                    bool idle  = (get_time_ms() - gLastUiEventMs) >= LCD_RESYNC_IDLE_MS;
-                    bool probe = LCD_PROBE_WHEN_IDLE && !gLcdWantFull && gLcdBaseTrusted
-                                 && !gDialDragActive && idle;
-                    bool full  = !probe;
+                    bool idle      = (get_time_ms() - gLastUiEventMs) >= LCD_RESYNC_IDLE_MS;
+                    bool probe     = LCD_PROBE_WHEN_IDLE && !gLcdWantFull && gLcdBaseTrusted
+                                     && !gDialDragActive && idle;
+
+                    // Streaming input: the last two events were close together AND one was just now.
+                    // A delta would land describing a screen that has already moved past.
+                    bool streaming = gDialDragActive
+                                     || (  (atomic_load(&gLastUiGapMs) < LCD_STREAM_GAP_MS)
+                                        && ((get_time_ms() - gLastUiEventMs) < LCD_STREAM_GAP_MS));
+                    bool full      = !probe && (gLcdWantFull || streaming || !LCD_USE_DELTAS);
 
                     atomic_store(&gLcdProbeInFlight, probe);
 
