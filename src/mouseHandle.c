@@ -297,8 +297,7 @@ void handle_key(void * win, int key, int scancode, int action, int mods) {
     if (found) {
         midi_post_button_event(bk, true);
         midi_post_button_event(bk, false);
-        gNeedLcdFull  = true;
-        gNeedLcdDelta = false;
+        gNeedLcdDelta = true;   // a delta, for the reasons emu_button_press() gives
         synthlib_request_redraw();
     }
 }

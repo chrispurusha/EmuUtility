@@ -54,6 +54,25 @@ extern _Atomic bool     gNeedLcdFull;         // request full LCD dump next poll
 extern _Atomic bool     gNeedLcdDelta;        // request delta LCD dump next poll
 extern _Atomic bool     gLcdPending;          // an LCD request is in-flight; don't send another
 
+// Delta stream bookkeeping. Routine updates are fetched as deltas rather than full frames because a
+// full frame is 2205 bytes on a 31250-baud DIN link — ~705 ms of wire time for every button press,
+// where the delta for a typical change is 377 bytes / ~256 ms (measured on an E5000, 2026-08-19).
+//
+// A delta is an XOR against the frame we already hold, so the two ends stay in step only for as
+// long as every delta is applied; one lost message would leave the display quietly wrong forever.
+// gLcdBaseTrusted is false from the moment a delta is applied until a full frame re-bases it, and
+// the MIDI thread fetches exactly one full frame once the display has been quiet for
+// LCD_RESYNC_IDLE_MS. That puts the expensive transfer where nobody is waiting on it, and bounds
+// how long a lost delta can go uncorrected. gLcdLastDeltaMs is when the last delta landed, i.e.
+// when that idle timer restarts.
+extern _Atomic bool     gLcdBaseTrusted;
+extern _Atomic double   gLcdLastDeltaMs;
+
+// When the in-flight LCD request went out, so the debug log can report the round trip it cost. Worth
+// carrying permanently: on a DIN link the size of the reply IS the response time (2205 bytes = ~705
+// ms at 31250 baud), so "payloadLen + dt" is the whole latency story in one line.
+extern _Atomic double   gLcdReqMs;
+
 // Throttled LCD refresh while a dial drag is held: gDialDragActive is true
 // for the whole press-to-release span, and the MIDI poll thread requests one
 // delta dump every DIAL_LCD_POLL_INTERVAL_MS while it's set — regardless of

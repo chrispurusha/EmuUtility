@@ -23,6 +23,7 @@
 #include "types.h"
 #include "globalVars.h"
 #include "midiComms.h"
+#include "utils.h"     // get_time_ms(), for the delta-stream idle timer
 #include "peptalk.h"
 
 // SysEx frame: [F0, 18, 7F, device_id, seq_id, msg_type, ...data, F7]
@@ -124,8 +125,9 @@ uint32_t peptalk_unpack_7bit(const uint8_t * src, uint32_t srcLen, uint8_t * dst
 // Derived from the JS implementation in ctrl.mjs.
 // The delta stream encodes runs of pixels to skip or flip using RLE.
 
-void peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen) {
+bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen) {
     bool     flipping = false;
+    bool     overran  = false;
     uint32_t bytePos  = 0;
     int      bitPos   = 7;
 
@@ -136,6 +138,13 @@ void peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen) {
             for (uint8_t j = 0; j < run; j++) {
                 if (bytePos < LCD_BYTES) {
                     gLcd.pixels[bytePos] ^= (uint8_t)(1 << bitPos);
+                } else {
+                    // A delta that runs off the end of the frame was computed against a different
+                    // base than the one we hold — the clamp keeps it from corrupting memory, but the
+                    // picture is now definitely wrong and only a full frame can fix it. Reported
+                    // rather than silently swallowed: this is the one moment we can KNOW we are out
+                    // of step, instead of waiting for the idle resync to find out.
+                    overran = true;
                 }
 
                 if (--bitPos < 0) {
@@ -160,6 +169,8 @@ void peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen) {
             flipping = !flipping;
         }
     }
+
+    return !overran;
 }
 
 // ── Incoming message dispatch ─────────────────────────────────────────────────
@@ -209,7 +220,8 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
         case PEPTALK_LCD_DUMP_RESP:
         {
-            LOG_DEBUG("peptalk LCD 0x50 payloadLen=%u\n", (unsigned)payloadLen);
+            LOG_DEBUG("peptalk LCD 0x50 payloadLen=%u roundTrip=%.0fms\n",
+                      (unsigned)payloadLen, get_time_ms() - gLcdReqMs);
 
             if (payloadLen < 10) {
                 break;
@@ -228,13 +240,23 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                 memcpy(gLcd.pixels, tmp, LCD_BYTES);
                 gLcd.refresh++;
                 pthread_mutex_unlock(&gLcdMutex);
+                gLcdBaseTrusted = true;   // a whole frame: the delta stream is re-based on it
                 synthlib_request_redraw();
             } else if (unpacked > 0) {
-                // Partial payload in same message type — treat as delta
+                // Partial payload in the same message type — treat as a delta. The device answers a
+                // delta REQUEST with 0x50 rather than 0x53 when it feels like it, so this branch is
+                // the normal path for a button press, not an oddity.
                 pthread_mutex_lock(&gLcdMutex);
-                peptalk_apply_lcd_delta(tmp, unpacked);
+                bool applied = peptalk_apply_lcd_delta(tmp, unpacked);
                 gLcd.refresh++;
                 pthread_mutex_unlock(&gLcdMutex);
+                gLcdBaseTrusted = false;  // holds only while every delta since the last full frame landed
+                gLcdLastDeltaMs = get_time_ms();
+
+                if (!applied) {
+                    LOG_ERROR("LCD delta overran the frame — re-basing immediately\n");
+                    gNeedLcdFull = true;
+                }
                 synthlib_request_redraw();
             }
             break;
@@ -242,7 +264,8 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
         case PEPTALK_LCD_DELTA_RESP:
         {
-            LOG_DEBUG("peptalk LCD 0x53 payloadLen=%u\n", (unsigned)payloadLen);
+            LOG_DEBUG("peptalk LCD 0x53 payloadLen=%u roundTrip=%.0fms\n",
+                      (unsigned)payloadLen, get_time_ms() - gLcdReqMs);
 
             gLcdPending = false;
 
@@ -256,9 +279,16 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
             if (unpacked > 0) {
                 pthread_mutex_lock(&gLcdMutex);
-                peptalk_apply_lcd_delta(tmp, unpacked);
+                bool applied = peptalk_apply_lcd_delta(tmp, unpacked);
                 gLcd.refresh++;
                 pthread_mutex_unlock(&gLcdMutex);
+                gLcdBaseTrusted = false;
+                gLcdLastDeltaMs = get_time_ms();
+
+                if (!applied) {
+                    LOG_ERROR("LCD delta overran the frame — re-basing immediately\n");
+                    gNeedLcdFull = true;
+                }
                 synthlib_request_redraw();
             }
             break;
@@ -277,9 +307,9 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
         case PEPTALK_BUTTON_EVENT:
         {
-            // Always request a full dump on any button echo; see mouseHandle.c.
-            gNeedLcdFull  = true;
-            gNeedLcdDelta = false;
+            // A delta, for the same reason emu_button_press() asks for one; the idle resync in
+            // midi_thread() is what guarantees the frame is eventually re-based.
+            gNeedLcdDelta = true;
             synthlib_request_redraw();
             break;
         }

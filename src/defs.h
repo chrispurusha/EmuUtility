@@ -54,6 +54,29 @@
 // E-mu EOS device family (E4, E5000, etc.)
 #define EMU_EOS_FAMILY              (1025)
 
+// ── LCD refresh ──────────────────────────────────────────────────────────────
+// How long the display has to stay quiet before one full frame is fetched to re-base the delta
+// stream. Measured on a real E5000 over DIN MIDI (2026-08-19): a full frame is 2205 bytes on the
+// wire = ~705 ms at 31250 baud, and the round trip measures 714-874 ms; the delta for a typical
+// button press is 377 bytes / ~256 ms. So routine updates go by delta and the expensive full frame
+// is deferred to a moment when nobody is waiting for it.
+//
+// Deliberately NOT eager. A resync cannot be recalled once its request is on the wire, so one
+// firing just before a key press makes THAT press wait out the full frame ahead of it. At 1500 ms
+// a user clicking every couple of seconds triggered one between almost every press; five seconds
+// means only a genuine pause pays for it. The precise trigger lives elsewhere anyway — a delta that
+// overruns the frame re-bases immediately (see peptalk_apply_lcd_delta) — so this timer only covers
+// the case of a delta that was never delivered at all.
+#define LCD_RESYNC_IDLE_MS    (5000.0)
+
+// How long an LCD request may stay in flight before it is written off. gLcdPending exists to keep
+// one request on the wire at a time, but nothing ever cleared it except a reply — so a single lost
+// or corrupted response left it set forever and the display simply stopped updating, with no error
+// and no way back short of a restart. That mattered less when every update was a full frame the
+// user was already waiting on; it matters more now the delta stream is the normal path. Comfortably
+// clear of the worst round trip measured (1119 ms for a full frame queued behind a delta).
+#define LCD_REQUEST_TIMEOUT_MS    (3000.0)
+
 // ── Computer-keyboard note entry ─────────────────────────────────────────────
 // Notes go out as ordinary MIDI, not PEPTALK: PEPTALK drives the front panel, and a note is not a
 // front-panel event. The sampler plays them on its own basic channel, so this must match whatever

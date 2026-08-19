@@ -47,7 +47,10 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length);
 uint32_t peptalk_unpack_7bit(const uint8_t * src, uint32_t srcLen, uint8_t * dst, uint32_t dstLen);
 
 // Apply a delta (RLE XOR) update to gLcd.pixels.
-void peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen);
+// Applies an RLE-XOR delta to gLcd.pixels. Returns false if the delta ran off the end of the frame,
+// which means it was computed against a base we no longer hold — the caller must then fetch a full
+// frame, because nothing short of one can put the picture right. Caller holds gLcdMutex.
+bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen);
 
 #ifdef __cplusplus
 }

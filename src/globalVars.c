@@ -42,6 +42,10 @@ _Atomic bool     gNeedLcdFull    = true;
 _Atomic bool     gNeedLcdDelta   = false;
 _Atomic bool     gLcdPending     = false;
 
+_Atomic bool     gLcdBaseTrusted = false;
+_Atomic double   gLcdLastDeltaMs = 0.0;
+_Atomic double   gLcdReqMs       = 0.0;
+
 _Atomic bool     gDialDragActive = false;
 _Atomic double   gLastLcdPollMs  = 0.0;
 

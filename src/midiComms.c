@@ -536,6 +536,28 @@ static void * midi_thread(void * arg) {
                 gLastLcdPollMs = get_time_ms();
             }
 
+            // Re-base the delta stream once the display has gone quiet. Deltas are XORs against
+            // the frame we hold, so a lost one would leave the display wrong indefinitely; this
+            // bounds that to LCD_RESYNC_IDLE_MS without ever putting a ~705 ms full frame in front
+            // of a user who is still pressing keys. Deliberately skipped while a dial drag is held
+            // — that path is a continuous stream of deltas and is quiet only once the drag ends.
+            if (  !gLcdBaseTrusted && !gLcdPending && !gDialDragActive
+               && !gNeedLcdFull && !gNeedLcdDelta
+               && ((get_time_ms() - gLcdLastDeltaMs) >= LCD_RESYNC_IDLE_MS)) {
+                LOG_DEBUG("LCD idle resync: taking one full frame to re-base the delta stream\n");
+                gNeedLcdFull = true;
+            }
+
+            // Write off a request whose reply never came, and re-base with a full frame — after a
+            // lost reply the delta stream has no valid base anyway. Without this, gLcdPending
+            // latched on forever and the display went permanently stale.
+            if (gLcdPending && ((get_time_ms() - gLcdReqMs) >= LCD_REQUEST_TIMEOUT_MS)) {
+                LOG_ERROR("LCD request timed out after %.0fms — re-basing with a full frame\n",
+                          get_time_ms() - gLcdReqMs);
+                gLcdPending  = false;
+                gNeedLcdFull = true;
+            }
+
             if (gNeedLeds) {
                 extern void peptalk_send_led_state_request(void);
                 peptalk_send_led_state_request();
@@ -545,11 +567,13 @@ static void * midi_thread(void * arg) {
                 // it before we have a chance to set it (race on USB round-trip).
                 if (gNeedLcdFull) {
                     extern void peptalk_send_lcd_dump_request(void);
+                    gLcdReqMs    = get_time_ms();
                     gLcdPending  = true;
                     gNeedLcdFull = false;
                     peptalk_send_lcd_dump_request();
                 } else if (gNeedLcdDelta) {
                     extern void peptalk_send_lcd_delta_request(void);
+                    gLcdReqMs     = get_time_ms();
                     gLcdPending   = true;
                     gNeedLcdDelta = false;
                     peptalk_send_lcd_delta_request();

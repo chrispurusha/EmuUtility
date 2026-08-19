@@ -384,11 +384,17 @@ void emu_button_press(tButtonKey key, bool pressed) {
     LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
     btn->pressed  = pressed;
     midi_post_button_event(btn->key, pressed);
-    // Always request a full dump after any button press. Deltas are only
-    // safe when we know the hardware's base state hasn't drifted — button
-    // presses can change the display in ways that compound delta errors.
-    gNeedLcdFull  = true;
-    gNeedLcdDelta = false;
+    // A DELTA, not a full dump. A full frame is 2205 bytes on a 31250-baud DIN link — measured at
+    // 714-874 ms per press on a real E5000 — where the delta for a typical change is 377 bytes and
+    // 256 ms. Even a whole-page change is no worse: the device simply answers with the whole frame
+    // when the delta would not be smaller, so asking for a delta never costs more than asking for
+    // the frame.
+    //
+    // This used to force a full dump on the grounds that deltas compound errors. They do, but that
+    // risk is not new here — the dial drag has always driven an unbounded stream of them — and it
+    // is answered directly by the idle resync in midi_thread(), which re-bases the frame once the
+    // display has been quiet for LCD_RESYNC_IDLE_MS. See globalVars.h (gLcdBaseTrusted).
+    gNeedLcdDelta = true;
     synthlib_request_redraw();
 }
 
