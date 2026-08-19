@@ -43,7 +43,8 @@ typedef enum {
     eMsgCmdIdentityReply,  // identityReplyData: an identity reply seen by the CoreMIDI read callback
     eMsgCmdSessionOpen,
     eMsgCmdButtonEvent,    // buttonEventData
-    eMsgCmdRotaryEvent     // rotaryEventData
+    eMsgCmdRotaryEvent,    // rotaryEventData
+    eMsgCmdNoteEvent       // noteEventData: a MIDI note from the computer-keyboard note entry
 } eMsgCmd;
 
 // Posted by the CoreMIDI read callback, acted on by the MIDI thread: the callback only validates and
@@ -66,11 +67,18 @@ typedef struct {
 } tRotaryEventData;
 
 typedef struct {
+    uint8_t note;
+    uint8_t velocity;
+    bool    on;
+} tNoteEventData;
+
+typedef struct {
     uint32_t cmd;
     union {
         tIdentityReplyData identityReplyData;
         tButtonEventData   buttonEventData;
         tRotaryEventData   rotaryEventData;
+        tNoteEventData     noteEventData;
     };
 } tMessageContent;
 

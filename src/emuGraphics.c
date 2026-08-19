@@ -51,6 +51,51 @@ static uint32_t gLastRefresh = 0xFFFFFFFF;
 
 static uint32_t gDialValue   = 0;
 
+// ── Front-panel button layout ─────────────────────────────────────────────────
+// Matches the physical E4/E5000 front panel layout. Declared up here, ahead of the LCD, because
+// the LCD's own position and size are derived FROM it — see the soft-key block below.
+
+// Left-panel button geometry
+#define LP_W           84.0
+#define LP_H           20.0
+#define LP_GAP         4.0
+#define LP_ROW         (LP_H + LP_GAP)
+
+#define LP_ORIGIN_X    10.0
+#define LP_ORIGIN_Y    (160.0 + MENU_BAR_HEIGHT)
+#define LP_COL_X(c)    (LP_ORIGIN_X + LP_GAP + (c) * (LP_W + LP_GAP))
+#define LP_FKEY_COL    4           // F1 is the fifth button along the top row; F2..F6 follow it
+
+// ── LCD soft keys ─────────────────────────────────────────────────────────────
+// The six boxes the sampler draws along the bottom of its own display are its soft keys, and F1..F6
+// are the buttons that press them. These are their positions WITHIN the 240x64 bitmap, in device
+// pixels, read straight off a live E5000 (2026-08-19) with the LCDDUMP backdoor command in
+// graphics.c, which prints the raw bitmap as an ASCII grid for exactly this purpose.
+//
+// The device divides the full 240-pixel width into six exact 40-pixel cells at x = 0, 40, 80, 120,
+// 160, 200, draws a 39-pixel rounded box in each (one pixel of gutter between neighbours), and the
+// row occupies y = 51..63 — flush with the bottom edge of the display. The click target is the
+// whole 40-pixel cell rather than the 39-pixel box, so the gutters aren't dead pixels between two
+// live keys.
+//
+// EMU_SOFTKEY_COUNT itself lives in emuGraphics.h — graphics.c's backdoor walks the boxes too.
+#define LCD_SOFTKEY_X        0.0    // left edge of the first cell
+#define LCD_SOFTKEY_PITCH    40.0   // cell-to-cell stride
+#define LCD_SOFTKEY_W        40.0   // full cell width (the drawn box inside it is 39)
+#define LCD_SOFTKEY_Y        51.0   // top edge of the box row
+#define LCD_SOFTKEY_H        13.0   // through to the last row of the display
+
+// The LCD is placed and sized FROM the F-key geometry rather than independently, so each soft-key
+// box lands directly above the button that presses it and stays there if either the button grid or
+// the measured box geometry is ever adjusted. Scaling the bitmap so one box spans exactly one
+// button pitch fixes the width; centring box 0 on F1 then fixes the left edge.
+#define LCD_SCALE_X    ((LP_W + LP_GAP) / LCD_SOFTKEY_PITCH)
+#define LCD_W          (LCD_WIDTH * LCD_SCALE_X)
+#define LCD_H          120.0
+#define LCD_SCALE_Y    (LCD_H / (double)LCD_HEIGHT)
+#define LCD_X          (LP_COL_X(LP_FKEY_COL) + (LP_W * 0.5) - LCD_SCALE_X * (LCD_SOFTKEY_X + (LCD_SOFTKEY_W * 0.5)))
+#define LCD_Y          (20.0 + MENU_BAR_HEIGHT)
+
 // ── LCD texture ───────────────────────────────────────────────────────────────
 
 void init_lcd_texture(void) {
@@ -106,6 +151,45 @@ static void update_lcd_texture(void) {
     gLastRefresh = snapshotRefresh;   // matches the pixels we just uploaded, not a possibly-newer value
 }
 
+tRectangle emu_lcd_rect(void) {
+    return (tRectangle){{
+                            LCD_X, LCD_Y
+                        }, {
+                            LCD_W, LCD_H
+                        }
+    };
+}
+
+tRectangle emu_softkey_rect(int index) {
+    tRectangle rect = {{0.0, 0.0}, {0.0, 0.0}};
+
+    if ((index < 0) || (index >= EMU_SOFTKEY_COUNT)) {
+        return rect;
+    }
+    rect.coord.x = LCD_X + LCD_SCALE_X * (LCD_SOFTKEY_X + ((double)index * LCD_SOFTKEY_PITCH));
+    rect.coord.y = LCD_Y + LCD_SCALE_Y * LCD_SOFTKEY_Y;
+    rect.size.w  = LCD_SCALE_X * LCD_SOFTKEY_W;
+    rect.size.h  = LCD_SCALE_Y * LCD_SOFTKEY_H;
+    return rect;
+}
+
+// F1..F6 are not contiguous in the PEPTALK key numbering (they interleave with Assign 3, Audition,
+// Ctrl/FX, Prev and Next — see tButtonKey), so the mapping is spelled out rather than computed.
+static const tButtonKey gSoftKeyOrder[EMU_SOFTKEY_COUNT] = {pkF1, pkF2, pkF3, pkF4, pkF5, pkF6};
+
+tButtonKey emu_softkey_button(int index) {
+    return ((index < 0) || (index >= EMU_SOFTKEY_COUNT)) ? (tButtonKey)0 : gSoftKeyOrder[index];
+}
+
+// Clicking a box on the display is exactly the same event as clicking the F-key beneath it, so it
+// goes through the same handler — including that handler's press/release semantics and its
+// "always ask for a full LCD dump afterwards" rule. userData is the index, not a pointer, because
+// the boxes are not objects: they are regions computed from the layout each frame.
+static void softkey_click_handler(tCoord coord, eClickPhase phase, void * userData) {
+    (void)coord;
+    emu_button_press(emu_softkey_button((int)(intptr_t)userData), phase == eClickPress);
+}
+
 void render_lcd() {
     if (gLcdTexture == 0) {
         return;
@@ -114,27 +198,24 @@ void render_lcd() {
     if (gLcd.refresh != gLastRefresh) {
         update_lcd_texture();
     }
-    double x = 200;
-    double y = 20 + MENU_BAR_HEIGHT;
-    double w = 500;
-    double h = 120;
+    tRectangle lcd = emu_lcd_rect();
 
     // Green border around the display area
     set_rgb_colour((tRgb)RGB_LCD_BG);
-    render_rectangle(mainArea, (tRectangle){{x - LCD_BORDER, y - LCD_BORDER},
-                                            {w + LCD_BORDER * 2.0, h + LCD_BORDER * 2.0}
+    render_rectangle(mainArea, (tRectangle){{lcd.coord.x - LCD_BORDER, lcd.coord.y - LCD_BORDER},
+                                            {lcd.size.w + LCD_BORDER * 2.0, lcd.size.h + LCD_BORDER * 2.0}
                      });
 
     if (!gSessionOpen) {
         return;
     }
-    render_rectangle(mainArea, (tRectangle){{x - LCD_BORDER, y - LCD_BORDER},
-                                            {w + LCD_BORDER * 2.0, h + LCD_BORDER * 2.0}
-                     });
+    render_texture(mainArea, lcd, gLcdTexture);
 
-    render_texture(mainArea, (tRectangle){{x, y},
-                                          {w, h}
-                   }, gLcdTexture);
+    // The soft-key boxes are only live while a session is open — with no display content there is
+    // nothing on them to press.
+    for (int i = 0; i < EMU_SOFTKEY_COUNT; i++) {
+        register_click_region(emu_softkey_rect(i), eClickLayerPanel, softkey_click_handler, (void *)(intptr_t)i);
+    }
 }
 
 void render_dial_knob(void) {
@@ -199,15 +280,7 @@ void dial_nudge_by_angle(double deltaDegrees) {
     }
 }
 
-// ── Button layout ─────────────────────────────────────────────────────────────
-// Matches the physical E4/E5000 front panel layout.
-
-// Left-panel button geometry
-#define LP_W          84.0
-#define LP_H          20.0
-#define LP_GAP        4.0
-#define LP_ROW        (LP_H + LP_GAP)
-
+// ── Button layout (right-hand section) ───────────────────────────────────────
 // Right-section absolute x positions
 #define RP_DEC_X      896.0  // DEC button
 #define RP_DEC_W      60.0
@@ -298,11 +371,16 @@ static tButton * find_button(tButtonKey key) {
 // Buttons act on both press and release (unlike the dial, which only arms on
 // press) — mirrors the "btn->pressed = pressed" line previously in
 // handle_mouse_button()'s inline hit-test (removed from mouseHandle.c).
-static void button_click_handler(tCoord coord, eClickPhase phase, void * userData) {
-    (void)coord;
-    tButton * btn     = (tButton *)userData;
-    bool      pressed = (phase == eClickPress);
+//
+// Split out of the click handler so the soft-key boxes drawn on the LCD, and the backdoor's BUTTON
+// command, raise exactly the same event a click on the button itself does — including lighting the
+// on-screen button, so pressing a box on the display visibly presses the F-key below it.
+void emu_button_press(tButtonKey key, bool pressed) {
+    tButton * btn = find_button(key);
 
+    if (btn == NULL) {
+        return;
+    }
     LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
     btn->pressed  = pressed;
     midi_post_button_event(btn->key, pressed);
@@ -312,6 +390,11 @@ static void button_click_handler(tCoord coord, eClickPhase phase, void * userDat
     gNeedLcdFull  = true;
     gNeedLcdDelta = false;
     synthlib_request_redraw();
+}
+
+static void button_click_handler(tCoord coord, eClickPhase phase, void * userData) {
+    (void)coord;
+    emu_button_press(((tButton *)userData)->key, phase == eClickPress);
 }
 
 static void render_button_at(tButtonKey key, double x, double y, double w, double h) {
@@ -339,8 +422,8 @@ static void render_button_at(tButtonKey key, double x, double y, double w, doubl
 }
 
 void render_button_panel() {
-    double                  ox          = 10;
-    double                  oy          = 160 + MENU_BAR_HEIGHT;
+    double                  ox          = LP_ORIGIN_X;
+    double                  oy          = LP_ORIGIN_Y;
 
     // Clear stale hit rectangles for buttons not placed in this layout
     for (int i = 0; i < NUM_BUTTONS; i++) {
@@ -368,8 +451,10 @@ void render_button_panel() {
         pkExit,    pkPrev,         pkNext, pkEnter
     };
 
+    // LP_COL_X() rather than a local expression: emu_softkey_rect() places the LCD's soft-key boxes
+    // off the same macro, so the boxes cannot drift away from the F-keys they sit above.
     for (int c = 0; c < 10; c++) {
-        double x = ox + LP_GAP + c * (LP_W + LP_GAP);
+        double x = LP_COL_X(c);
         render_button_at(lp_row0[c], x, r0, LP_W, LP_H);
         render_button_at(lp_row1[c], x, r1, LP_W, LP_H);
     }
@@ -400,6 +485,35 @@ void render_button_panel() {
             render_button_at(np[nr][nc], ox + RP_NP_X + nc * RP_NP_STR, ny, RP_NP_W, LP_H);
         }
     }
+}
+
+// ── Testing helpers (backdoor command channel) ───────────────────────────────
+
+const tButton * emu_button_at_index(int index) {
+    return ((index < 0) || (index >= NUM_BUTTONS)) ? NULL : &gButtons[index];
+}
+
+bool emu_button_lookup(const char * name, tButtonKey * keyOut) {
+    if ((name == NULL) || (name[0] == '\0') || (keyOut == NULL)) {
+        return false;
+    }
+
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        if (strcasecmp(gButtons[i].label, name) == 0) {
+            *keyOut = gButtons[i].key;
+            return true;
+        }
+    }
+
+    // Fall back to a raw PEPTALK key code, for a button that has no on-screen label yet.
+    char * end  = NULL;
+    long   code = strtol(name, &end, 0);
+
+    if ((end != NULL) && (*end == '\0') && (find_button((tButtonKey)code) != NULL)) {
+        *keyOut = (tButtonKey)code;
+        return true;
+    }
+    return false;
 }
 
 #ifdef __cplusplus

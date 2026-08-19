@@ -41,6 +41,7 @@ extern "C" {
 #include "mouseHandle.h"
 #include "appMenuBar.h"
 #include "clickRegion.h"
+#include "noteEntry.h"
 
 // Convert GLFW window-space (x,y) to logical canvas coordinates.
 static tCoord window_to_logical(void * win, double x, double y) {
@@ -240,9 +241,16 @@ void handle_cursor_pos(void * win, double x, double y) {
 void handle_key(void * win, int key, int scancode, int action, int mods) {
     (void)win;
     (void)scancode;
-    (void)mods;
 
-    if (action == 0) {   // GLFW_RELEASE
+    // Note entry comes first, and gets releases as well as presses — a note has to be let go of.
+    // It returns true only for the keys it owns, so a key that plays a note never also reaches the
+    // front-panel mapping below.
+    if (handle_note_entry_key(key, mods, action)) {
+        synthlib_request_redraw();
+        return;
+    }
+
+    if (action == GLFW_RELEASE) {
         return;
     }
     // Basic keyboard → PEPTALK button mapping

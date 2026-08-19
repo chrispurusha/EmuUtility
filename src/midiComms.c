@@ -392,6 +392,16 @@ void midi_post_rotary_event(int delta) {
     post_to_midi_thread(&msg);
 }
 
+void midi_post_note_event(uint8_t note, uint8_t velocity, bool on) {
+    tMessageContent msg = {0};
+
+    msg.cmd                    = eMsgCmdNoteEvent;
+    msg.noteEventData.note     = note;
+    msg.noteEventData.velocity = velocity;
+    msg.noteEventData.on       = on;
+    post_to_midi_thread(&msg);
+}
+
 void midi_post_session_open(void) {
     tMessageContent msg = {0};
 
@@ -442,6 +452,25 @@ static void drain_midi_commands(void) {
             case eMsgCmdRotaryEvent:
                 peptalk_send_rotary_event((int)msg.rotaryEventData.delta);
                 break;
+
+            case eMsgCmdNoteEvent:
+            {
+                // An explicit Note Off (0x80) rather than the running-status "Note On, velocity 0"
+                // shorthand: this app never uses running status, so the shorthand saves nothing,
+                // and a device that treats a zero-velocity Note On as a real strike would be left
+                // with a stuck note.
+                uint8_t note[3] = {
+                    (uint8_t)((msg.noteEventData.on ? MIDI_NOTE_ON : MIDI_NOTE_OFF) | NOTE_ENTRY_MIDI_CHANNEL),
+                    (uint8_t)(msg.noteEventData.note & 0x7F),
+                    (uint8_t)(msg.noteEventData.on ? (msg.noteEventData.velocity & 0x7F) : 0)
+                };
+
+                LOG_DEBUG("MIDI note %s ch=%u note=%u vel=%u (%02X %02X %02X)\n",
+                          msg.noteEventData.on ? "on" : "off", (unsigned)(NOTE_ENTRY_MIDI_CHANNEL + 1),
+                          (unsigned)msg.noteEventData.note, (unsigned)note[2], note[0], note[1], note[2]);
+                midi_send(note, sizeof(note));
+                break;
+            }
 
             default:
                 LOG_ERROR("Unknown MIDI-thread command %u\n", (unsigned)msg.cmd);

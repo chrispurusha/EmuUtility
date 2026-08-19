@@ -46,6 +46,16 @@ void setup_main_menu(void) {
     load_saved_settings();
 }
 
+// See misc.h — the sandbox container's tmp folder, which is the only place the backdoor command
+// channel can actually read and write.
+const char * emu_temp_dir(void) {
+    static char buf[1024];
+
+    strncpy(buf, [NSTemporaryDirectory() UTF8String], sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    return buf;
+}
+
 void register_sleep_wake_notifications(void) {
     [[[NSWorkspace sharedWorkspace] notificationCenter]
      addObserverForName:NSWorkspaceDidWakeNotification

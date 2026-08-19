@@ -51,6 +51,33 @@ void init_lcd_texture(void);
 // Total panel height needed for buttons below the LCD.
 double button_panel_height(double areaWidth);
 
+// ── LCD soft keys ─────────────────────────────────────────────────────────────
+// The six boxes the sampler draws along the bottom of its own display are its soft keys. They are
+// clickable, and each raises the same event as the F-key directly beneath it — which is why the LCD
+// is positioned from the F-key geometry rather than independently (see emuGraphics.c).
+
+#define EMU_SOFTKEY_COUNT    6
+
+// Where the LCD bitmap and each soft-key box are drawn, in render coordinates.
+tRectangle emu_lcd_rect(void);
+tRectangle emu_softkey_rect(int index);
+
+// Which front-panel button soft key `index` corresponds to (0 -> F1 ... 5 -> F6).
+tButtonKey emu_softkey_button(int index);
+
+// Raise a front-panel button press or release: lights the on-screen button, sends the PEPTALK
+// event, and asks for a fresh full LCD dump. Shared by the button click handler, the soft-key
+// boxes, and the backdoor's BUTTON command.
+void emu_button_press(tButtonKey key, bool pressed);
+
+// ── Testing helpers (backdoor command channel, graphics.c) ───────────────────
+
+// Walk every button in layout order; NULL once past the end.
+const tButton * emu_button_at_index(int index);
+
+// Resolve a button by its on-screen label (case-insensitive, exact) or by its raw PEPTALK key code.
+bool emu_button_lookup(const char * name, tButtonKey * keyOut);
+
 #ifdef __cplusplus
 }
 #endif

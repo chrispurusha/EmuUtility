@@ -21,38 +21,51 @@
 #define __DEFS_H__
 
 // ── Build toggles ─────────────────────────────────────────────────────────────
-#define ENABLE_DEBUG                  1
-#define ENABLE_LOG_DEBUG              1
+#define ENABLE_DEBUG                1
+#define ENABLE_LOG_DEBUG            1
 
 // Window
-#define WINDOW_TITLE                  "EmuUtility"
-#define TARGET_FRAME_BUFF_WIDTH       (2560)
-#define TARGET_FRAME_BUFF_HEIGHT      (1440)   // 16:9, matching G2-Edit/SynthEdit
+#define WINDOW_TITLE                "EmuUtility"
+#define TARGET_FRAME_BUFF_WIDTH     (2560)
+#define TARGET_FRAME_BUFF_HEIGHT    (1440)     // 16:9, matching G2-Edit/SynthEdit
 
 // LCD display geometry
-#define LCD_WIDTH                     (240)
-#define LCD_HEIGHT                    (64)
-#define LCD_BYTES                     (LCD_WIDTH * LCD_HEIGHT / 8)          // 1920
+#define LCD_WIDTH                   (240)
+#define LCD_HEIGHT                  (64)
+#define LCD_BYTES                   (LCD_WIDTH * LCD_HEIGHT / 8)            // 1920
 
 // PEPTALK SysEx constants
-#define EMU_MANUFACTURER_ID           (0x18)          // E-mu/Ensoniq
-#define PEPTALK_DEST                  (0x7F)          // broadcast destination
+#define EMU_MANUFACTURER_ID         (0x18)            // E-mu/Ensoniq
+#define PEPTALK_DEST                (0x7F)            // broadcast destination
 
 // PEPTALK message types
-#define PEPTALK_SESSION_OPEN          (0x10)
-#define PEPTALK_SESSION_CLOSE         (0x11)
-#define PEPTALK_BUTTON_EVENT          (0x40)
-#define PEPTALK_ROTARY_EVENT          (0x43)
-#define PEPTALK_LCD_DUMP_RESP         (0x50)
-#define PEPTALK_LCD_DUMP_REQ          (0x51)
-#define PEPTALK_LCD_DELTA_REQ         (0x52)
-#define PEPTALK_LCD_DELTA_RESP        (0x53)
-#define PEPTALK_LED_STATE_REQ         (0x60)
-#define PEPTALK_LED_STATE_RESP        (0x61)
-#define PEPTALK_SESSION_STATUS        (0x7F)
+#define PEPTALK_SESSION_OPEN        (0x10)
+#define PEPTALK_SESSION_CLOSE       (0x11)
+#define PEPTALK_BUTTON_EVENT        (0x40)
+#define PEPTALK_ROTARY_EVENT        (0x43)
+#define PEPTALK_LCD_DUMP_RESP       (0x50)
+#define PEPTALK_LCD_DUMP_REQ        (0x51)
+#define PEPTALK_LCD_DELTA_REQ       (0x52)
+#define PEPTALK_LCD_DELTA_RESP      (0x53)
+#define PEPTALK_LED_STATE_REQ       (0x60)
+#define PEPTALK_LED_STATE_RESP      (0x61)
+#define PEPTALK_SESSION_STATUS      (0x7F)
 
 // E-mu EOS device family (E4, E5000, etc.)
-#define EMU_EOS_FAMILY                (1025)
+#define EMU_EOS_FAMILY              (1025)
+
+// ── Computer-keyboard note entry ─────────────────────────────────────────────
+// Notes go out as ordinary MIDI, not PEPTALK: PEPTALK drives the front panel, and a note is not a
+// front-panel event. The sampler plays them on its own basic channel, so this must match whatever
+// that is set to (MASTER > MIDI on the device). Channel 1 is the factory default, and 0 here is
+// the wire value for it — MIDI channels are 1-based on a front panel and 0-based on the wire.
+#define NOTE_ENTRY_MIDI_CHANNEL       (0)
+#define NOTE_ENTRY_VELOCITY           (100)
+#define NOTE_ENTRY_FIRST_NOTE         (48)     // C3 — the note the 'a' key plays before any octave shift
+#define NOTE_ENTRY_MAX_NOTE           (127)
+
+#define MIDI_NOTE_OFF                 (0x80)
+#define MIDI_NOTE_ON                  (0x90)
 
 // MIDI identity request (Universal SysEx)
 #define MIDI_SYSEX_START              (0xF0)

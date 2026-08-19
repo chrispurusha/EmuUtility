@@ -56,6 +56,10 @@ void midi_post_button_event(tButtonKey key, bool pressed);
 void midi_post_rotary_event(int delta);
 void midi_post_session_open(void);
 
+// A MIDI Note On/Off for the computer-keyboard note entry (noteEntry.c). Ordinary channel-voice
+// MIDI rather than PEPTALK — see NOTE_ENTRY_MIDI_CHANNEL in defs.h.
+void midi_post_note_event(uint8_t note, uint8_t velocity, bool on);
+
 // Send MIDI Identity Request to all outputs to discover connected devices. MIDI-THREAD ONLY.
 void midi_send_identity_request(void);
 

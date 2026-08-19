@@ -35,6 +35,12 @@ void setup_main_menu(void);
 // prefs_init(). Implemented in persistence.c.
 void load_saved_settings(void);
 
+// This app's own container tmp directory, with a trailing '/'. The App Sandbox
+// (com.apple.security.app-sandbox) makes a hardcoded "/tmp/..." path silently unreachable —
+// fopen() just returns NULL, no error — so the backdoor command channel in graphics.c builds its
+// paths on top of this instead. Same helper, same reason, as SynthEdit's synth_temp_dir().
+const char * emu_temp_dir(void);
+
 #ifdef __cplusplus
 }
 #endif
