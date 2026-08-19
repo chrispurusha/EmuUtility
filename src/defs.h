@@ -91,8 +91,34 @@
 
 // Whether to use the protocol's delta (XOR) refresh at all. OFF, deliberately.
 //
-// Delta CONTENT is never displayed. Deltas are used only as a change detector (LCD_PROBE_WHEN_IDLE),
-// and whole frames are the only thing allowed to decide what is on screen.
+// Delta content is NOT displayed for input-driven refreshes. Tried, measured, reverted 2026-08-20.
+//
+// The idea was sound on paper — a single press updating in ~250 ms instead of ~715 — and it survived
+// every scripted test (10/10 settled states correct). It failed in the hand: the owner saw the
+// "old, new, old, new" bounce come straight back.
+//
+// The trace shows why, and it kills the premise rather than the implementation. Deltas are cheap only
+// when the device is IDLE: 61 ms. Under burst input a delta measured **729 ms** — the sampler is busy
+// and answers no faster than it would for a whole frame. So the fast path is fast precisely when it
+// is not needed, and no faster than a frame exactly when it is, while still carrying the risk that a
+// reply arrives describing a screen the user has moved past.
+//
+// Deltas remain in use as the idle change-detector (LCD_PROBE_WHEN_IDLE), where 61 ms is real and the
+// screen is by definition still. Streaming input (a dial drag, or presses closer together than
+// LCD_STREAM_GAP_MS) still uses whole frames, because there a delta lands describing a screen the
+// user has already moved past.
+//
+// This is safe only because of two rules that took a long time to arrive at, and it becomes unsafe
+// again the moment either is relaxed:
+//   1. a delta payload is ALWAYS applied, never discarded (see peptalk.c) — the device advances its
+//      "what I last sent you" reference when it sends one, so throwing a payload away leaves its
+//      base ahead of ours;
+//   2. any reply that IS discarded — superseded by input during its flight — forces a whole frame
+//      before another delta is trusted.
+//
+// Break either and the failure is specific and reproducible: the next delta computes as A^B, and
+// applying that to B lands exactly on A. The display reverts to the previous value, cleanly. That is
+// the "old, new, old, new" bounce, and it is arithmetic rather than corruption.
 //
 // This is not conservatism, it is arithmetic. A delta is an XOR against "what I last sent you", and
 // the device advances that reference whenever it sends one — including for a probe, whose payload we

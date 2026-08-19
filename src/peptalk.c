@@ -375,25 +375,28 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                 // delta REQUEST with 0x50 rather than 0x53 when it feels like it, so this branch is
                 // the normal path for a button press, not an oddity.
                 pthread_mutex_lock(&gLcdMutex);
-                // ALWAYS commit, probe or not.
+                // A PROBE never commits. Tried committing, 2026-08-20, and the "old, new, old, new"
+                // bounce came straight back with it — on a build where probes were the only deltas
+                // being applied at all, which is what isolates this as the cause.
                 //
-                // Discarding a probe's payload was the source of the "old, new, old, new" bounce: the
-                // device advances its "what I last sent you" reference whenever it sends a delta, so
-                // throwing one away leaves its base ahead of ours, and the NEXT delta then computes as
-                // A^B — applying that to B lands exactly on A, the old value, restored perfectly.
-                //
-                // There was never anything wrong with the payload itself. A probe only goes out when
-                // the display has been still, so its delta is computed from a base we do hold and is
-                // correct. Applying it keeps both ends in step AND updates the screen immediately.
-                bool applied = peptalk_apply_lcd_delta(tmp, unpacked, true, &reply.changed);
+                // Discarding is what makes it safe: a probe that reports change ALWAYS forces a whole
+                // frame, and that frame re-bases us before any further delta is ever applied. So the
+                // device's reference running ahead of ours never gets the chance to matter. Applying
+                // the payload instead paints whatever the delta produces — and when its base is not
+                // the frame we hold, that is a visibly wrong intermediate.
+                bool committed = !midi_lcd_probe_in_flight();
+                bool applied   = peptalk_apply_lcd_delta(tmp, unpacked, committed, &reply.changed);
 
-                if (applied && reply.changed) {
-                    gLcd.refresh++;   // only a delta that moved something is worth a redraw
+                if (applied && committed && reply.changed) {
+                    gLcd.refresh++;   // only a delta actually written to the display is worth a redraw
                 }
                 pthread_mutex_unlock(&gLcdMutex);
 
                 // An empty delta changed nothing, so the base is as good as it was — that is the
                 // common idle answer and it must not force a re-base.
+                // A probe that saw movement leaves the device's reference ahead of ours precisely
+                // because we threw its payload away — so the base is untrusted either way, and the
+                // whole frame that follows is what puts it right.
                 if (applied && reply.changed) {
                     gLcdBaseTrusted = false;   // holds only while every delta since the last full frame landed
                     gLcdLastDeltaMs = get_time_ms();
@@ -442,7 +445,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
             if (unpacked > 0) {
                 pthread_mutex_lock(&gLcdMutex);
-                bool applied = peptalk_apply_lcd_delta(tmp, unpacked, true, &reply.changed);   // commit, probe or not — see the 0x50 path
+                bool applied = peptalk_apply_lcd_delta(tmp, unpacked, !midi_lcd_probe_in_flight(), &reply.changed);
 
                 if (applied) {
                     gLcd.refresh++;   // only a delta we actually committed is worth a redraw
