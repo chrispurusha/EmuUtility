@@ -83,7 +83,16 @@ static uint32_t gDialValue   = 0;
 #define LCD_SOFTKEY_PITCH    40.0   // cell-to-cell stride
 #define LCD_SOFTKEY_W        40.0   // full cell width (the drawn box inside it is 39)
 #define LCD_SOFTKEY_Y        51.0   // top edge of the box row
-#define LCD_SOFTKEY_H        13.0   // through to the last row of the display
+
+// How far down the display the click-to-Exit zone reaches, in device pixels.
+//
+// Deliberately NOT "everything above the soft keys". The sampler stacks things there: Utils raises a
+// second row of boxes, and a popup such as Sample Info puts an OK button well above the normal band.
+// Treating that whole area as Exit would fire Exit at a button the user was aiming for. The top half
+// is title and value text on every screen seen so far, and rows 32-50 are left as a dead margin
+// rather than assumed safe.
+#define LCD_EXIT_ZONE_H    32.0
+#define LCD_SOFTKEY_H      13.0     // through to the last row of the display
 
 // The LCD is placed and sized FROM the F-key geometry rather than independently, so each soft-key
 // box lands directly above the button that presses it and stays there if either the button grid or
@@ -173,6 +182,26 @@ tRectangle emu_softkey_rect(int index) {
     return rect;
 }
 
+tRectangle emu_lcd_body_rect(void) {
+    // The TOP band only — see LCD_EXIT_ZONE_H for why this stops well short of the soft keys rather
+    // than running down to them.
+    return (tRectangle){{
+                            LCD_X, LCD_Y
+                        }, {
+                            LCD_W, LCD_SCALE_Y * LCD_EXIT_ZONE_H
+                        }
+    };
+}
+
+// Clicking the body of the display — the area with no soft key under it — issues Exit. That mirrors
+// what the hardware's own Exit key does: back out of wherever you are. The soft-key boxes keep their
+// own regions, so only the part of the screen with nothing under it behaves this way.
+static void lcd_body_click_handler(tCoord coord, eClickPhase phase, void * userData) {
+    (void)coord;
+    (void)userData;
+    emu_button_press(pkExit, phase == eClickPress);
+}
+
 // F1..F6 are not contiguous in the PEPTALK key numbering (they interleave with Assign 3, Audition,
 // Ctrl/FX, Prev and Next — see tButtonKey), so the mapping is spelled out rather than computed.
 static const tButtonKey gSoftKeyOrder[EMU_SOFTKEY_COUNT] = {pkF1, pkF2, pkF3, pkF4, pkF5, pkF6};
@@ -213,6 +242,10 @@ void render_lcd() {
 
     // The soft-key boxes are only live while a session is open — with no display content there is
     // nothing on them to press.
+    // Registered BEFORE the soft keys so those sit on top of it — the body is the fallback for the
+    // part of the display with nothing under it.
+    register_click_region(emu_lcd_body_rect(), eClickLayerPanel, lcd_body_click_handler, NULL);
+
     for (int i = 0; i < EMU_SOFTKEY_COUNT; i++) {
         register_click_region(emu_softkey_rect(i), eClickLayerPanel, softkey_click_handler, (void *)(intptr_t)i);
     }

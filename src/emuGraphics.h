@@ -62,6 +62,10 @@ double button_panel_height(double areaWidth);
 tRectangle emu_lcd_rect(void);
 tRectangle emu_softkey_rect(int index);
 
+// The display ABOVE the soft-key row — the part with no key under it. Clicking there issues Exit,
+// which is the front panel's own way of backing out of wherever you are.
+tRectangle emu_lcd_body_rect(void);
+
 // Which front-panel button soft key `index` corresponds to (0 -> F1 ... 5 -> F6).
 tButtonKey emu_softkey_button(int index);
 
