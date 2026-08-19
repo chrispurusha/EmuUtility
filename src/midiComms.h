@@ -76,9 +76,11 @@ void midi_post_led_refresh(void);
 // Hand the MIDI thread the outcome of an LCD reply the CoreMIDI callback has already dealt with.
 void midi_post_lcd_reply(const tLcdReplyData * reply);
 
-// The sequence id of the LCD request currently outstanding, for the callback thread's staleness
-// check. Written only by the MIDI thread. Returns false when nothing is outstanding.
-bool midi_outstanding_lcd_seq(uint8_t * seqOut);
+// Should this reply be refused rather than applied? True only when the timeout has left more than
+// one request outstanding AND this reply's sequence id is not the one we are waiting for — a
+// mismatch alone means nothing, because the device also speaks unprompted. MIDI thread owns the
+// state; the callback thread only reads it.
+bool midi_lcd_reply_suspect(uint8_t replySeq);
 
 // Send MIDI Identity Request to all outputs to discover connected devices. MIDI-THREAD ONLY.
 void midi_send_identity_request(void);

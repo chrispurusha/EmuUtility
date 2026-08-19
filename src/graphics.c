@@ -358,6 +358,11 @@ static void render_frame(GLFWwindow * win) {
 //                        note entry and the keyboard-to-panel shortcuts can be exercised headlessly.
 //                        A single character ('a', 'z') or a raw GLFW key code. With no third word it
 //                        does a press AND a release.
+//   BURST <label> <n> <gapMs> — press AND release a button n times with a real gap between each
+//                        edge, on the render thread, exactly as rapid mouse clicking does. Exists
+//                        because BUTTON fires press and release in one dispatch, which is the one
+//                        thing a real click never does — and the lost-update bugs only show up when
+//                        the edges are separated in time.
 //   REFRESH            — ask the device for a full LCD dump on the next poll
 //   STATE              — session/device state plus the on-screen geometry: the LCD rectangle, the
 //                        six soft-key rectangles, and every button's rectangle
@@ -589,6 +594,35 @@ static void backdoor_dispatch(const char * cmd, const char * arg, GLFWwindow * w
             handle_key(win, glfwKey, 0, GLFW_RELEASE, 0);
         }
         synthlib_request_redraw();
+        backdoor_write_result("OK\n");
+    } else if (strcmp(cmd, "BURST") == 0) {
+        char       name[32] = {0};
+        int        count    = 0;
+        int        gapMs    = 0;
+        tButtonKey key      = 0;
+
+        if (sscanf(arg, "%31s %d %d", name, &count, &gapMs) != 3) {
+            backdoor_write_result("ERROR: expected 'BURST <label|code> <count> <gapMs>'\n");
+            return;
+        }
+
+        if (!emu_button_lookup(name, &key)) {
+            backdoor_write_result("ERROR: no such button\n");
+            return;
+        }
+
+        if ((count < 1) || (count > 200) || (gapMs < 0) || (gapMs > 2000)) {
+            backdoor_write_result("ERROR: count 1-200, gapMs 0-2000\n");
+            return;
+        }
+
+        for (int i = 0; i < count; i++) {
+            emu_button_press(key, true);
+            usleep((useconds_t)gapMs * 1000);
+            emu_button_press(key, false);
+            usleep((useconds_t)gapMs * 1000);
+        }
+
         backdoor_write_result("OK\n");
     } else if (strcmp(cmd, "REFRESH") == 0) {
         midi_post_lcd_refresh(true);

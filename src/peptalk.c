@@ -142,7 +142,11 @@ uint32_t peptalk_unpack_7bit(const uint8_t * src, uint32_t srcLen, uint8_t * dst
 // Derived from the JS implementation in ctrl.mjs.
 // The delta stream encodes runs of pixels to skip or flip using RLE.
 
-bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen) {
+// Applies into `frame`, which is NOT the live buffer — see the call sites. A delta that turns out to
+// overrun is only recognisable part-way through XOR-ing it, so applying straight to the display would
+// paint a half-wrong picture and correct it a round trip later: visible, brief corruption. Working on
+// a scratch copy means a bad delta is simply never shown.
+static bool apply_lcd_delta_to(uint8_t * frame, const uint8_t * unpacked, uint32_t unpackedLen) {
     bool     flipping = false;
     bool     overran  = false;
     uint32_t bytePos  = 0;
@@ -154,7 +158,7 @@ bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen) {
         if (flipping) {
             for (uint8_t j = 0; j < run; j++) {
                 if (bytePos < LCD_BYTES) {
-                    gLcd.pixels[bytePos] ^= (uint8_t)(1 << bitPos);
+                    frame[bytePos] ^= (uint8_t)(1 << bitPos);
                 } else {
                     // A delta that runs off the end of the frame was computed against a different
                     // base than the one we hold — the clamp keeps it from corrupting memory, but the
@@ -190,6 +194,19 @@ bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen) {
     return !overran;
 }
 
+// Public form: applies to the live frame only if the whole delta fits. Caller holds gLcdMutex.
+bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen) {
+    static uint8_t scratch[LCD_BYTES];
+
+    memcpy(scratch, gLcd.pixels, LCD_BYTES);
+
+    if (!apply_lcd_delta_to(scratch, unpacked, unpackedLen)) {
+        return false;   // nothing committed; the display keeps the last frame it knew to be whole
+    }
+    memcpy(gLcd.pixels, scratch, LCD_BYTES);
+    return true;
+}
+
 // ── Incoming message dispatch ─────────────────────────────────────────────────
 
 // A reply has landed. Returns false when it belongs to a request we already gave up on — replies come
@@ -201,11 +218,8 @@ bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen) {
 // delta would XOR against a frame that has since moved on. Nothing here writes request state — the
 // outcome goes back as a message so the owning thread decides what it means.
 static bool lcd_reply_is_current(uint8_t replySeq) {
-    uint8_t expected = 0;
-
-    if (midi_outstanding_lcd_seq(&expected) && (replySeq != expected)) {
-        LOG_ERROR("Discarding stale LCD reply: seq=%02X, expected %02X\n",
-                  (unsigned)replySeq, (unsigned)expected);
+    if (midi_lcd_reply_suspect(replySeq)) {
+        LOG_ERROR("Discarding stale LCD reply seq=%02X\n", (unsigned)replySeq);
         return false;
     }
     return true;
@@ -338,7 +352,10 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                 // the normal path for a button press, not an oddity.
                 pthread_mutex_lock(&gLcdMutex);
                 bool applied = peptalk_apply_lcd_delta(tmp, unpacked);
-                gLcd.refresh++;
+
+                if (applied) {
+                    gLcd.refresh++;   // only a delta we actually committed is worth a redraw
+                }
                 pthread_mutex_unlock(&gLcdMutex);
                 gLcdBaseTrusted = false;  // holds only while every delta since the last full frame landed
                 gLcdLastDeltaMs = get_time_ms();
@@ -380,7 +397,10 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
             if (unpacked > 0) {
                 pthread_mutex_lock(&gLcdMutex);
                 bool applied = peptalk_apply_lcd_delta(tmp, unpacked);
-                gLcd.refresh++;
+
+                if (applied) {
+                    gLcd.refresh++;   // only a delta we actually committed is worth a redraw
+                }
                 pthread_mutex_unlock(&gLcdMutex);
                 gLcdBaseTrusted = false;
                 gLcdLastDeltaMs = get_time_ms();

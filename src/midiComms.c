@@ -65,17 +65,32 @@ static int                  gLcdInFlightOwn      = 0;
 static double               gLcdReqMsOwn         = 0.0;
 static bool                 gLcdSettledOwn       = true;
 
-// Read by the CoreMIDI callback for its staleness check, so it must be atomic — but this thread is
-// still its only writer.
+// Read by the CoreMIDI callback for its staleness check, so these must be atomic — but this thread
+// is still their only writer.
 static _Atomic uint8_t      gLcdOutstandingSeq   = 0;
 static _Atomic bool         gLcdOutstandingValid = false;
+static _Atomic int          gLcdOutstandingCount = 0;
 
-bool midi_outstanding_lcd_seq(uint8_t * seqOut) {
+// Is this reply one we should refuse to apply?
+//
+// A sequence mismatch ALONE is not enough, and assuming it was cost real updates. The device also
+// speaks unprompted — the session-status message is one such, and LCD replies turn up carrying ids
+// we never sent — so a mismatched reply is usually perfectly good data that simply was not an answer
+// to our outstanding request. Discarding those left the display several presets behind the hardware
+// and stuck there, because the request stayed marked pending with nothing left to answer it.
+//
+// A reply can only be genuinely STALE if more than one request is actually outstanding, which
+// happens solely when the timeout gave up on one and sent another. That is the discriminator: the
+// mismatch says WHICH reply is the old one, the count says whether an old one can exist at all.
+bool midi_lcd_reply_suspect(uint8_t replySeq) {
+    if (atomic_load(&gLcdOutstandingCount) <= 1) {
+        return false;
+    }
+
     if (!atomic_load(&gLcdOutstandingValid)) {
         return false;
     }
-    *seqOut = atomic_load(&gLcdOutstandingSeq);
-    return true;
+    return replySeq != atomic_load(&gLcdOutstandingSeq);
 }
 
 // SysEx reassembly — CoreMIDI fragments large messages across multiple packets, so the bytes have
@@ -472,12 +487,18 @@ void midi_send(const uint8_t * data, uint32_t length) {
 // ── Command posting (any thread) ─────────────────────────────────────────────
 
 static void post_to_midi_thread(const tMessageContent * msg) {
-    CFRunLoopRef runLoop = atomic_load(&gMidiRunLoop);
-
     msg_send(&gToMidiThread, msg);
 
     // Cut short the MIDI thread's current CFRunLoopRunInMode wait so the command is drained now
     // rather than up to one idle tick (33ms) later. CFRunLoopWakeUp is documented thread-safe.
+    //
+    // The run loop is read AFTER the send, not before. Reading it first meant a message posted while
+    // the MIDI thread was still starting up saw NULL and skipped the wake even though the thread was
+    // running by the time the message actually landed — it then sat in the queue for a whole idle
+    // tick. Reading after the send cannot go stale in the direction that matters: if the run loop
+    // exists once the message is queued, we signal it.
+    CFRunLoopRef runLoop = atomic_load(&gMidiRunLoop);
+
     if (runLoop != NULL) {
         CFRunLoopWakeUp(runLoop);
     }

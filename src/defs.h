@@ -67,7 +67,18 @@
 // means only a genuine pause pays for it. The precise trigger lives elsewhere anyway — a delta that
 // overruns the frame re-bases immediately (see peptalk_apply_lcd_delta) — so this timer only covers
 // the case of a delta that was never delivered at all.
-#define LCD_RESYNC_IDLE_MS    (5000.0)
+//
+// Raised 5000 -> 20000 on 2026-08-20. A resync cannot be recalled once its request is on the wire,
+// so if the user resumes inside the ~715 ms it takes, their input queues behind it: the hardware
+// moves on and the screen catches up a beat later. A five-second pause is a normal part of using the
+// thing, so that collision was reachable. Twenty seconds is a genuine walk-away.
+//
+// The cost of waiting longer is now much lower than it was when this value was chosen. Back then
+// deltas were suspect and this was the only safety net; since, the actual causes have been found and
+// fixed (foreign MIDI splicing into the reassembly buffer, replies mispaired with requests, the
+// request state machine racing between two threads), and a delta that overruns the frame already
+// forces an immediate re-base. This is now genuine insurance rather than routine maintenance.
+#define LCD_RESYNC_IDLE_MS    (20000.0)
 
 // How long an LCD request may stay in flight before it is written off. gLcdPending exists to keep
 // one request on the wire at a time, but nothing ever cleared it except a reply — so a single lost
