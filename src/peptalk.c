@@ -378,7 +378,13 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                     gLcd.refresh++;   // only a delta we actually committed is worth a redraw
                 }
                 pthread_mutex_unlock(&gLcdMutex);
-                gLcdBaseTrusted = false;  // holds only while every delta since the last full frame landed
+
+                // A probe commits nothing, so it cannot have moved us off the base — saying
+                // otherwise made every probe trigger a full re-base, which is precisely the cost the
+                // probe exists to avoid.
+                if (!midi_lcd_probe_in_flight()) {
+                    gLcdBaseTrusted = false;
+                }  // holds only while every delta since the last full frame landed
                 gLcdLastDeltaMs = get_time_ms();
 
                 if (!applied) {
@@ -430,7 +436,13 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                     gLcd.refresh++;   // only a delta we actually committed is worth a redraw
                 }
                 pthread_mutex_unlock(&gLcdMutex);
-                gLcdBaseTrusted = false;
+
+                // A probe commits nothing, so it cannot have moved us off the base — saying
+                // otherwise made every probe trigger a full re-base, which is precisely the cost the
+                // probe exists to avoid.
+                if (!midi_lcd_probe_in_flight()) {
+                    gLcdBaseTrusted = false;
+                }
                 gLcdLastDeltaMs = get_time_ms();
 
                 if (!applied) {
