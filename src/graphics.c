@@ -59,6 +59,7 @@ extern "C" {
 #include "synthlibPersistence.h"
 #include "noteEntry.h"
 #include "sampleDump.h"
+#include "peptalk.h"      // peptalk_send_raw(), for the PEPTALK exploration command
 
 static void setup_projection(GLFWwindow * win);
 
@@ -388,6 +389,8 @@ static void render_frame(GLFWwindow * win) {
 //                        request for a sample that is not there.
 //   SDSPROGRESS        — packets sent / total, and whether the receiver is handshaking
 //   SDSCANCEL          — abandon a transfer in progress
+//   PEPTALK <type> [hex bytes...] — send an arbitrary PEPTALK message, for protocol exploration.
+//                        e.g. "PEPTALK 41 41" tries message type 0x41 with one payload byte 0x41.
 //   REFRESH            — ask the device for a full LCD dump on the next poll
 //   STATE              — session/device state plus the on-screen geometry: the LCD rectangle, the
 //                        six soft-key rectangles, and every button's rectangle
@@ -870,6 +873,32 @@ static void backdoor_dispatch(const char * cmd, const char * arg, GLFWwindow * w
             return;
         }
         midi_set_press_settle_ms(ms);
+        backdoor_write_result("OK\n");
+    } else if (strcmp(cmd, "PEPTALK") == 0) {
+        unsigned     type     = 0;
+        uint8_t      data[32] = {0};
+        uint32_t     len      = 0;
+        const char * at       = arg;
+        char *       end      = NULL;
+
+        type = (unsigned)strtoul(at, &end, 16);
+
+        if ((end == at) || (type > 0x7F)) {
+            backdoor_write_result("ERROR: expected 'PEPTALK <type hex> [byte hex ...]'\n");
+            return;
+        }
+        at   = end;
+
+        while ((len < sizeof(data))) {
+            unsigned long b = strtoul(at, &end, 16);
+
+            if (end == at) {
+                break;
+            }
+            data[len++] = (uint8_t)b;
+            at          = end;
+        }
+        peptalk_send_raw((uint8_t)type, (len > 0) ? data : NULL, len);
         backdoor_write_result("OK\n");
     } else if (strcmp(cmd, "REFRESH") == 0) {
         midi_post_lcd_refresh(true);

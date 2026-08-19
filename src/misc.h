@@ -20,6 +20,8 @@
 #ifndef __MISC_H__
 #define __MISC_H__
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,6 +36,10 @@ void setup_main_menu(void);
 // Applies saved window size/position and dial mode — called once by setup_main_menu() right after
 // prefs_init(). Implemented in persistence.c.
 void load_saved_settings(void);
+
+// Persists the Controls > Keyboard Plays Notes setting. Implemented in persistence.c alongside the
+// window and dial-mode state.
+void save_note_keyboard_setting(bool enabled);
 
 // This app's own container tmp directory, with a trailing '/'. The App Sandbox
 // (com.apple.security.app-sandbox) makes a hardcoded "/tmp/..." path silently unreachable —

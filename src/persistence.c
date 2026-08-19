@@ -29,10 +29,24 @@
 #include "graphics.h"
 #include "prefs.h"
 #include "synthlibPersistence.h"
+#include "noteEntry.h"
+
+#define PREFS_KEY_NOTE_KEYBOARD    "noteKeyboard"
 
 // Restores window size/position/dial-mode state saved from a previous run. Called once at
 // startup from setup_main_menu() (misc.mm) — prefs_init() must run before this (also there), so
 // the settings file is loaded before any of these get_* calls.
 void load_saved_settings(void) {
     synthlib_load_window_and_dial_mode(TARGET_FRAME_BUFF_WIDTH, TARGET_FRAME_BUFF_HEIGHT);
+
+    // Whether the computer keyboard plays notes. Remembered rather than defaulted, because which
+    // setting is "right" depends on what the user is doing: playing the sampler wants it on, editing
+    // a name on the device itself wants it off, and having to set it again every launch is the kind
+    // of small friction that makes a preference worth storing at all. Defaults ON for a fresh
+    // install, so the keyboard works without anyone having to find the menu first.
+    note_entry_set_enabled(prefs_get_int(PREFS_KEY_NOTE_KEYBOARD, 1) != 0);
+}
+
+void save_note_keyboard_setting(bool enabled) {
+    prefs_set_int(PREFS_KEY_NOTE_KEYBOARD, enabled ? 1 : 0);
 }

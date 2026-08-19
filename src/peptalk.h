@@ -61,6 +61,12 @@ bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen, boo
 // outstanding-request state so a reply can be matched to the request that asked for it.
 uint8_t peptalk_last_request_seq(void);
 
+// Send an arbitrary PEPTALK message. Exists ONLY for protocol exploration from the backdoor — the
+// message types this app understands are a small subset of what the device implements, and the gaps
+// in the numbering (0x41, 0x42, 0x44 sit between BUTTON 0x40 and ROTARY 0x43) are the obvious place
+// to look for anything else. Nothing in the app proper should call this.
+void peptalk_send_raw(uint8_t msgType, const uint8_t * data, uint32_t dataLen);
+
 #ifdef __cplusplus
 }
 #endif

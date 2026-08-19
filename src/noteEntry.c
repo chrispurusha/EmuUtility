@@ -65,6 +65,7 @@ static const int gNoteKeys[] = {
 #define NOTE_KEY_COUNT    ((int)(sizeof(gNoteKeys) / sizeof(gNoteKeys[0])))
 
 static uint8_t   gFirstNote               = NOTE_ENTRY_FIRST_NOTE;
+static bool      gEnabled                 = true;
 
 // What each key is currently sounding, or -1 for a key that is up. Recorded per key rather than
 // recomputed on release, so shifting the octave while a note is held still releases the note that
@@ -116,7 +117,24 @@ static void shift_octave(int semitones) {
     gFirstNote = (uint8_t)next;
 }
 
+void note_entry_set_enabled(bool enabled) {
+    if (!enabled) {
+        note_entry_all_notes_off();   // never leave a note ringing across the switch
+    }
+    gEnabled = enabled;
+}
+
+bool note_entry_enabled(void) {
+    return gEnabled;
+}
+
 bool handle_note_entry_key(int key, int mods, int action) {
+    // Switched off: consume nothing, so the letter keys remain available to whatever else wants them
+    // rather than being silently swallowed by a keyboard that is not playing.
+    if (!gEnabled) {
+        return false;
+    }
+
     // Cmd/Ctrl/Alt suppress note entry entirely, so a shortcut on one of these letters can never
     // also play. Checked before the map lookup so a modified key falls through as an ordinary key
     // press rather than being swallowed.

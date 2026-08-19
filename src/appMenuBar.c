@@ -33,6 +33,7 @@ extern "C" {
 #include "misc.h"
 #include "graphics.h"
 #include "appMenuBar.h"
+#include "noteEntry.h"
 #include "synthlibPersistence.h"
 
 // Just two menus, each with a handful of items — small enough that (unlike
@@ -73,12 +74,21 @@ static void action_dial_mode_horizontal(int index) {
     synthlib_save_dial_mode(synthlib_dial_mode());
 }
 
+static void action_toggle_note_keyboard(int index) {
+    (void)index;
+    bool enabled = !note_entry_enabled();
+
+    note_entry_set_enabled(enabled);
+    save_note_keyboard_setting(enabled);   // same treatment as the dial mode above
+}
+
 static void open_controls_menu(tCoord anchor) {
     static tMenuItem items[]      = {
-        {"* Rotary",     (tRgb)RGB_GREY_3, action_dial_mode_rotary,     0, NULL, 0, 0.0},
-        {"* Vertical",   (tRgb)RGB_GREY_3, action_dial_mode_vertical,   0, NULL, 0, 0.0},
-        {"* Horizontal", (tRgb)RGB_GREY_3, action_dial_mode_horizontal, 0, NULL, 0, 0.0},
-        {NULL,           (tRgb)RGB_BLACK,  NULL,                        0, NULL, 0, 0.0},
+        {"* Rotary",             (tRgb)RGB_GREY_3, action_dial_mode_rotary,     0, NULL, 0, 0.0},
+        {"* Vertical",           (tRgb)RGB_GREY_3, action_dial_mode_vertical,   0, NULL, 0, 0.0},
+        {"* Horizontal",         (tRgb)RGB_GREY_3, action_dial_mode_horizontal, 0, NULL, 0, 0.0},
+        {"Keyboard Plays Notes", (tRgb)RGB_GREY_3, action_toggle_note_keyboard, 0, NULL, 0, 0.0},
+        {NULL,                   (tRgb)RGB_BLACK,  NULL,                        0, NULL, 0, 0.0},
     };
 
     // Labels are fixed strings with a checkmark prefix baked in (tMenuItem has no separate
@@ -92,6 +102,9 @@ static void open_controls_menu(tCoord anchor) {
     for (i = 0; i < 3; i++) {
         items[i].label = ((int)synthlib_dial_mode() == i) ? checked[i] : unchecked[i];
     }
+
+    // Same checkmark-in-the-label trick as the dial modes above (tMenuItem has no checked flag).
+    items[3].label = note_entry_enabled() ? "* Keyboard Plays Notes" : "Keyboard Plays Notes";
 
     open_context_menu(anchor, items, 0, 0.0);
 }

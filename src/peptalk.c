@@ -67,6 +67,11 @@ static uint8_t send_peptalk(uint8_t msgType, const uint8_t * data, uint32_t data
 // answering the right question.
 static uint8_t gLastRequestSeq = 0;
 
+void peptalk_send_raw(uint8_t msgType, const uint8_t * data, uint32_t dataLen) {
+    LOG_DEBUG("PEPTALK raw send type=0x%02X len=%u\n", msgType, (unsigned)dataLen);
+    send_peptalk(msgType, data, dataLen);
+}
+
 uint8_t peptalk_last_request_seq(void) {
     return gLastRequestSeq;
 }

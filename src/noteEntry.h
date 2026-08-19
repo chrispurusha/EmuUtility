@@ -44,6 +44,22 @@ void note_entry_all_notes_off(void);
 // the backdoor's STATE dump.
 uint8_t note_entry_first_note(void);
 
+// Whether the computer keyboard plays notes at all.
+//
+// Turned off while editing text on the device — a name, say — where the letter keys are wanted for
+// the sampler's own purposes and playing a note on every keystroke is worse than useless. Switching
+// off releases anything currently sounding, so a key held across the switch cannot stick.
+void note_entry_set_enabled(bool enabled);
+bool note_entry_enabled(void);
+
+// Whether the computer keyboard plays notes at all.
+//
+// Turned off while editing text on the device — a name, say — where the letter keys are wanted for
+// the sampler's own purposes and playing a note on every keystroke is worse than useless. Switching
+// off releases anything currently sounding, so a key held at the moment of the switch cannot stick.
+void note_entry_set_enabled(bool enabled);
+bool note_entry_enabled(void);
+
 #ifdef __cplusplus
 }
 #endif
