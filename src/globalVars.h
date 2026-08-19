@@ -50,28 +50,17 @@ extern _Atomic uint8_t  gSessionSeqId;
 // ── LCD ──────────────────────────────────────────────────────────────────────
 extern tLcdBuffer       gLcd;
 extern pthread_mutex_t  gLcdMutex;            // guards gLcd.pixels/refresh: MIDI-callback writer vs UI-thread reader
-extern _Atomic bool     gNeedLcdFull;         // request full LCD dump next poll
-extern _Atomic bool     gNeedLcdDelta;        // request delta LCD dump next poll
-extern _Atomic bool     gLcdPending;          // an LCD request is in-flight; don't send another
+// The LCD REQUEST state that used to live here — gNeedLcdFull, gNeedLcdDelta, gLcdPending,
+// gNeedLeds, gLcdInFlight, gLcdReqMs, gLcdSettled — is gone. It was written by both the MIDI thread
+// and the CoreMIDI read callback, and although each was _Atomic the read-modify-write SEQUENCES were
+// not: a want-bit set between one thread's test and the other's clear was silently dropped, and a
+// pending flag cleared while a request was being issued let two transfers overlap, which corrupts
+// the frame. It is now private to midiComms.c and everything else posts (midi_post_lcd_refresh /
+// midi_post_led_refresh / midi_post_lcd_reply). See that file for the ownership rule.
 
-// Delta stream bookkeeping. Routine updates are fetched as deltas rather than full frames because a
-// full frame is 2205 bytes on a 31250-baud DIN link — ~705 ms of wire time for every button press,
-// where the delta for a typical change is 377 bytes / ~256 ms (measured on an E5000, 2026-08-19).
-//
-// A delta is an XOR against the frame we already hold, so the two ends stay in step only for as
-// long as every delta is applied; one lost message would leave the display quietly wrong forever.
-// gLcdBaseTrusted is false from the moment a delta is applied until a full frame re-bases it, and
-// the MIDI thread fetches exactly one full frame once the display has been quiet for
-// LCD_RESYNC_IDLE_MS. That puts the expensive transfer where nobody is waiting on it, and bounds
-// how long a lost delta can go uncorrected. gLcdLastDeltaMs is when the last delta landed, i.e.
-// when that idle timer restarts.
 extern _Atomic bool     gLcdBaseTrusted;
 extern _Atomic double   gLcdLastDeltaMs;
 
-// When the in-flight LCD request went out, so the debug log can report the round trip it cost. Worth
-// carrying permanently: on a DIN link the size of the reply IS the response time (2205 bytes = ~705
-// ms at 31250 baud), so "payloadLen + dt" is the whole latency story in one line.
-extern _Atomic double   gLcdReqMs;
 
 // Throttled LCD refresh while a dial drag is held: gDialDragActive is true
 // for the whole press-to-release span, and the MIDI poll thread requests one
@@ -83,8 +72,13 @@ extern _Atomic double   gLcdReqMs;
 extern _Atomic bool     gDialDragActive;
 extern _Atomic double   gLastLcdPollMs;
 
+// When the user last did anything that could change the display. Written only by UI threads and read
+// only by the MIDI thread — ONE writer, which is why this one may stay a plain atomic. The matching
+// "has the trailing delta been taken yet" bit lives inside midiComms.c, because both threads would
+// otherwise write it. See LCD_SETTLE_MS in defs.h.
+extern _Atomic double   gLastUiEventMs;
+
 // ── LEDs ─────────────────────────────────────────────────────────────────────
 extern _Atomic uint32_t gLeds;            // bitmask of lit LEDs
-extern _Atomic bool     gNeedLeds;        // request LED state next poll
 
 #endif // __GLOBAL_VARS_H__

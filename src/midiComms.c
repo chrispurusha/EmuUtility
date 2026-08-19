@@ -30,23 +30,132 @@
 #define DIAL_LCD_POLL_INTERVAL_MS    120.0 // how often to poll for an LCD delta while a dial drag is held
 
 static void (*gWakeCb)(void) = NULL;
-static pthread_t            gMidiThread  = 0;
-static pthread_mutex_t      gSendMutex   = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t            gMidiThread          = 0;
+static pthread_mutex_t      gSendMutex           = PTHREAD_MUTEX_INITIALIZER;
 
 // The MIDI thread's own CFRunLoop, captured once the thread is up. Posting a command signals it so
 // the drain happens promptly instead of waiting out the current CFRunLoopRunInMode interval (up to
 // 33ms when idle — enough to make an on-screen button press feel laggy). Written once by the MIDI
 // thread, read by posting threads; NULL until then, in which case the command still gets drained on
 // the first tick, just without the early wake.
-static _Atomic CFRunLoopRef gMidiRunLoop = NULL;
+static _Atomic CFRunLoopRef gMidiRunLoop         = NULL;
 
 static int midi_scan_devices(void);
 
-// SysEx reassembly — CoreMIDI fragments large messages across multiple packets
-#define SYSEX_BUF_SIZE    8192
-static uint8_t              gSysExBuf[SYSEX_BUF_SIZE];
-static uint32_t             gSysExLen    = 0;
-static MIDIEndpointRef      gSysExSrc    = 0;
+// ── LCD request state — MIDI THREAD ONLY ─────────────────────────────────────
+// Every one of these used to be an _Atomic global written by BOTH this thread and the CoreMIDI read
+// callback. Individually atomic, but the SEQUENCES were not, and two races fell out of that:
+//
+//   * a want-bit set by the callback between this thread's read and its clear was silently dropped,
+//     leaving the display stale until the settle or the 5 s resync;
+//   * the callback's "gLcdPending = false" racing this thread's "gLcdPending = true" let a second
+//     request go out while the first was still on the wire — the very overlap that makes a stale
+//     delta land on a frame that has moved on, which is measurable corruption.
+//
+// They are plain statics now, not atomics, because exactly one thread touches them. Everyone else
+// POSTS (midi_post_lcd_refresh / midi_post_lcd_reply) and this thread decides what it means — the
+// same split handle_identity_reply() already uses, and the ownership rule msgQueue.h sets out.
+// Coalescing still works: N refresh requests all set the same bit, so they collapse into one
+// transfer, but none of them can be lost.
+static bool                 gLcdWantFull         = true;
+static bool                 gLcdWantDelta        = false;
+static bool                 gLcdWantLeds         = true;
+static bool                 gLcdPendingOwn       = false;
+static int                  gLcdInFlightOwn      = 0;
+static double               gLcdReqMsOwn         = 0.0;
+static bool                 gLcdSettledOwn       = true;
+
+// Read by the CoreMIDI callback for its staleness check, so it must be atomic — but this thread is
+// still its only writer.
+static _Atomic uint8_t      gLcdOutstandingSeq   = 0;
+static _Atomic bool         gLcdOutstandingValid = false;
+
+bool midi_outstanding_lcd_seq(uint8_t * seqOut) {
+    if (!atomic_load(&gLcdOutstandingValid)) {
+        return false;
+    }
+    *seqOut = atomic_load(&gLcdOutstandingSeq);
+    return true;
+}
+
+// SysEx reassembly — CoreMIDI fragments large messages across multiple packets, so the bytes have
+// to be gathered up until F7 before anything can be made of them.
+//
+// ONE BUFFER PER SOURCE, and that is the whole point. midi_scan_devices() connects EVERY MIDI source
+// on the machine (it has to — an identity reply can come from any of them), so on a real rig this
+// callback sees a dozen devices' traffic interleaved. A single shared buffer therefore let one
+// device's bytes land in the middle of another's message. That was not theoretical: with a 2205-byte
+// LCD frame taking ~705 ms to arrive over DIN, a controller streaming CCs in running status spliced
+// its data bytes straight into the E-mu's payload — measured 2026-08-20, payloads arriving at 2363
+// to 2759 bytes instead of 2205 and unpacking to 1936 where a frame is exactly 1920. A CC WITH its
+// status byte was no better: it took the "any other status byte aborts" path and destroyed the
+// transfer outright. Both were visible as corruption or a stalled display.
+//
+// No locking: CoreMIDI calls a port's read proc on one dedicated thread, and this app has a single
+// input port, so every callback for every source is serialised onto that one thread. The defect was
+// logical, not a race.
+#define SYSEX_BUF_SIZE       8192
+#define SYSEX_MAX_SOURCES    16
+
+typedef struct {
+    MIDIEndpointRef src;                  // the endpoint this slot is reassembling for; 0 = unused
+    uint32_t        len;                  // bytes buffered so far; 0 = no message in progress
+    uint8_t         buf[SYSEX_BUF_SIZE];
+} tSysExReassembly;
+
+static tSysExReassembly        gSysEx[SYSEX_MAX_SOURCES];
+
+// Once we have locked onto the E-mu there is nothing this app wants from any other device, so its
+// traffic is dropped at the door rather than merely kept in its own slot. Belt and braces over the
+// per-source buffers above: those make interleaving HARMLESS, this stops it being delivered at all,
+// and it keeps the CoreMIDI callback off the hot path for a dozen devices we do not care about.
+//
+// Zero while no device is locked on, which is exactly the window a scan needs — midi_scan_devices()
+// clears it before sending identity requests, so replies from every source still get through, and
+// handle_identity_reply() sets it once a device answers.
+//
+// Deliberately NOT a read of gMidiSource: that belongs to the MIDI thread (see globalVars.h), and
+// this is read on the CoreMIDI callback thread. Its own atomic, written by the owning thread.
+static _Atomic MIDIEndpointRef gSysExAcceptSrc = 0;
+
+// The slot for this source, claiming a free one on first sight. A slot is only ever reclaimed from a
+// source that is NOT mid-message, so growing past SYSEX_MAX_SOURCES can never truncate a transfer
+// that is already under way — it drops the newcomer's message instead, which is the safe direction.
+static tSysExReassembly * sysex_slot_for(MIDIEndpointRef src) {
+    tSysExReassembly * freeSlot = NULL;
+
+    for (int i = 0; i < SYSEX_MAX_SOURCES; i++) {
+        if (gSysEx[i].src == src) {
+            return &gSysEx[i];
+        }
+
+        if ((freeSlot == NULL) && (gSysEx[i].src == 0)) {
+            freeSlot = &gSysEx[i];
+        }
+    }
+
+    if (freeSlot == NULL) {
+        for (int i = 0; (i < SYSEX_MAX_SOURCES) && (freeSlot == NULL); i++) {
+            if (gSysEx[i].len == 0) {
+                freeSlot = &gSysEx[i];
+            }
+        }
+    }
+
+    if (freeSlot == NULL) {
+        LOG_ERROR("No free SysEx reassembly slot for source 0x%08X\n", (unsigned)src);
+        return NULL;
+    }
+    freeSlot->src = src;
+    freeSlot->len = 0;
+    return freeSlot;
+}
+
+// Endpoint refs do not survive a CoreMIDI setup change, so a rescan starts the table over rather
+// than leaving slots keyed to endpoints that no longer exist.
+static void sysex_reset_all(void) {
+    memset(gSysEx, 0, sizeof(gSysEx));
+}
 
 // ── Internal send to a specific destination ───────────────────────────────────
 
@@ -106,6 +215,7 @@ static void handle_identity_reply(const tIdentityReplyData * reply) {
     gDevice.connected = true;
     gMidiSource       = src;
     gMidiDest         = dest;
+    atomic_store(&gSysExAcceptSrc, src);   // from here on, ignore every other device's traffic
 
     LOG_DEBUG("Locked onto E-mu device\n");
 
@@ -196,43 +306,57 @@ static void dispatch_sysex(MIDIEndpointRef src, const uint8_t * data, uint32_t l
 static void midi_read_cb(const MIDIPacketList * pktList, void * readProcRefCon, void * srcConnRefCon) {
     (void)readProcRefCon;
 
-    MIDIEndpointRef    src = (MIDIEndpointRef)(uintptr_t)srcConnRefCon;
-    const MIDIPacket * pkt = &pktList->packet[0];
+    MIDIEndpointRef    src    = (MIDIEndpointRef)(uintptr_t)srcConnRefCon;
+    const MIDIPacket * pkt    = &pktList->packet[0];
+
+    // Resolved once per callback, not per byte: every byte in this packet list came from the same
+    // source, and only this source's reassembly may be touched by them.
+    MIDIEndpointRef    accept = atomic_load(&gSysExAcceptSrc);
+
+    if ((accept != 0) && (src != accept)) {
+        return;   // locked onto a device; nothing else on the rig is of any interest
+    }
+    tSysExReassembly * slot   = sysex_slot_for(src);
+
+    if (slot == NULL) {
+        return;
+    }
 
     for (uint32_t i = 0; i < pktList->numPackets; i++) {
         for (uint16_t b = 0; b < pkt->length; b++) {
             uint8_t byte = pkt->data[b];
 
             if (byte == MIDI_SYSEX_START) {
-                gSysExBuf[0] = byte;
-                gSysExLen    = 1;
-                gSysExSrc    = src;
+                slot->buf[0] = byte;
+                slot->len    = 1;
             } else if (byte == MIDI_SYSEX_END) {
-                if (gSysExLen > 0) {
-                    if (gSysExLen < SYSEX_BUF_SIZE) {
-                        gSysExBuf[gSysExLen++] = byte;
+                if (slot->len > 0) {
+                    if (slot->len < SYSEX_BUF_SIZE) {
+                        slot->buf[slot->len++] = byte;
                     }
-                    dispatch_sysex(gSysExSrc, gSysExBuf, gSysExLen);
-                    gSysExLen = 0;
+                    dispatch_sysex(slot->src, slot->buf, slot->len);
+                    slot->len = 0;
                 }
             } else if (byte >= 0xF8) {
                 // Realtime byte — valid inside SysEx, ignore for our purposes
             } else if (byte >= 0x80) {
-                // Any other status byte aborts the in-progress SysEx
-                if (gSysExLen > 0) {
-                    LOG_DEBUG("SysEx aborted by status 0x%02X after %u bytes\n",
-                              byte, (unsigned)gSysExLen);
-                    gSysExLen = 0;
+                // Any other status byte aborts the in-progress SysEx — but only THIS source's, which
+                // is the fix: a CC from another device used to abort whatever the E-mu was sending.
+                if (slot->len > 0) {
+                    LOG_DEBUG("SysEx aborted by status 0x%02X after %u bytes (src 0x%08X)\n",
+                              byte, (unsigned)slot->len, (unsigned)slot->src);
+                    slot->len = 0;
                 }
             } else {
-                // Data byte
-                if (gSysExLen > 0) {
-                    if (gSysExLen < SYSEX_BUF_SIZE) {
-                        gSysExBuf[gSysExLen++] = byte;
+                // Data byte. Appended only to the message this source has open; with a shared buffer
+                // these were what spliced one device's stream into another's payload.
+                if (slot->len > 0) {
+                    if (slot->len < SYSEX_BUF_SIZE) {
+                        slot->buf[slot->len++] = byte;
                     } else {
-                        LOG_ERROR("SysEx buffer overflow after %u bytes, discarding\n",
-                                  (unsigned)gSysExLen);
-                        gSysExLen = 0;
+                        LOG_ERROR("SysEx buffer overflow after %u bytes, discarding (src 0x%08X)\n",
+                                  (unsigned)slot->len, (unsigned)slot->src);
+                        slot->len = 0;
                     }
                 }
             }
@@ -260,6 +384,8 @@ static int midi_scan_devices(void) {
     gMidiSource = 0;
     gMidiDest   = 0;
     memset(&gDevice, 0, sizeof(gDevice));
+    sysex_reset_all();
+    atomic_store(&gSysExAcceptSrc, 0);      // a scan must hear every source, or no identity reply can land   // endpoint refs do not survive a setup change; see sysex_slot_for()
 
     for (ItemCount i = 0; i < srcCount; i++) {
         MIDIEndpointRef src  = MIDIGetSource(i);
@@ -402,6 +528,39 @@ void midi_post_note_event(uint8_t note, uint8_t velocity, bool on) {
     post_to_midi_thread(&msg);
 }
 
+void midi_note_ui_activity(void) {
+    tMessageContent msg = {0};
+
+    gLastUiEventMs = get_time_ms();   // UI threads are its only writer; the MIDI thread only reads it
+    msg.cmd        = eMsgCmdUiActivity;
+    post_to_midi_thread(&msg);
+}
+
+void midi_post_lcd_refresh(bool full) {
+    tMessageContent msg = {0};
+
+    msg.cmd                  = eMsgCmdLcdRefresh;
+    msg.lcdRefreshData.full  = full;
+    msg.lcdRefreshData.delta = !full;
+    post_to_midi_thread(&msg);
+}
+
+void midi_post_led_refresh(void) {
+    tMessageContent msg = {0};
+
+    msg.cmd                 = eMsgCmdLcdRefresh;
+    msg.lcdRefreshData.leds = true;
+    post_to_midi_thread(&msg);
+}
+
+void midi_post_lcd_reply(const tLcdReplyData * reply) {
+    tMessageContent msg = {0};
+
+    msg.cmd          = eMsgCmdLcdReply;
+    msg.lcdReplyData = *reply;
+    post_to_midi_thread(&msg);
+}
+
 void midi_post_session_open(void) {
     tMessageContent msg = {0};
 
@@ -451,6 +610,45 @@ static void drain_midi_commands(void) {
 
             case eMsgCmdRotaryEvent:
                 peptalk_send_rotary_event((int)msg.rotaryEventData.delta);
+                break;
+
+            case eMsgCmdLcdRefresh:
+
+                // Set a want-bit, never clear one — that asymmetry is what makes losing a request
+                // impossible, and it is why these are messages rather than flags other threads write.
+                gLcdWantFull  |= msg.lcdRefreshData.full;
+                gLcdWantDelta |= msg.lcdRefreshData.delta;
+                gLcdWantLeds  |= msg.lcdRefreshData.leds;
+                break;
+
+            case eMsgCmdLcdReply:
+                // Logged here, not at the point of receipt: this thread is the one that knows when
+                // the request went out, so it is the only one that can time the round trip.
+                LOG_DEBUG("LCD reply seq=%02X%s%s roundTrip=%.0fms\n",
+                          (unsigned)msg.lcdReplyData.seq,
+                          msg.lcdReplyData.stale ? " STALE" : "",
+                          msg.lcdReplyData.wasFullFrame ? " full" : " delta",
+                          get_time_ms() - gLcdReqMsOwn);
+
+                // One fewer message on the wire, whatever it turned out to be.
+                if (gLcdInFlightOwn > 0) {
+                    gLcdInFlightOwn--;
+                }
+
+                // A stale reply answered a request we had already abandoned, so the one we are
+                // actually waiting for is still outstanding and must stay marked as such.
+                if (!msg.lcdReplyData.stale) {
+                    gLcdPendingOwn = false;
+                    atomic_store(&gLcdOutstandingValid, false);
+                }
+
+                if (msg.lcdReplyData.needsFullFrame) {
+                    gLcdWantFull = true;
+                }
+                break;
+
+            case eMsgCmdUiActivity:
+                gLcdSettledOwn = false;
                 break;
 
             case eMsgCmdNoteEvent:
@@ -522,7 +720,12 @@ static void * midi_thread(void * arg) {
         // applied before this tick's polling decisions read the state it may have just changed.
         drain_midi_commands();
 
-        // Poll: if session open, request LCD/LED updates as needed
+        // Poll: if session open, request LCD/LED updates as needed.
+        //
+        // Every want-bit below is private to this thread (see their declarations). Other threads ASK
+        // via midi_post_lcd_refresh(); nothing outside this loop sets or clears them, so a request
+        // cannot be cleared before it was served and a reply cannot retire a request it did not
+        // answer.
         if (gSessionOpen) {
             // While a dial drag is held, poll for an LCD delta on a steady
             // throttled cadence — independent of whether new encoder ticks
@@ -530,9 +733,9 @@ static void * midi_thread(void * arg) {
             // drag (ticks never stop long enough to "go quiet") and a held
             // but paused drag (no ticks at all) alike. Never sends a new
             // encoder value itself — that's only ever driven by dial_nudge().
-            if (  gDialDragActive && !gLcdPending
+            if (  gDialDragActive && !gLcdPendingOwn
                && ((get_time_ms() - gLastLcdPollMs) >= DIAL_LCD_POLL_INTERVAL_MS)) {
-                gNeedLcdDelta  = true;
+                gLcdWantDelta  = true;
                 gLastLcdPollMs = get_time_ms();
             }
 
@@ -541,50 +744,73 @@ static void * midi_thread(void * arg) {
             // bounds that to LCD_RESYNC_IDLE_MS without ever putting a ~705 ms full frame in front
             // of a user who is still pressing keys. Deliberately skipped while a dial drag is held
             // — that path is a continuous stream of deltas and is quiet only once the drag ends.
-            if (  !gLcdBaseTrusted && !gLcdPending && !gDialDragActive
-               && !gNeedLcdFull && !gNeedLcdDelta
+            if (  !gLcdBaseTrusted && !gLcdPendingOwn && !gDialDragActive
+               && !gLcdWantFull && !gLcdWantDelta
                && ((get_time_ms() - gLcdLastDeltaMs) >= LCD_RESYNC_IDLE_MS)) {
                 LOG_DEBUG("LCD idle resync: taking one full frame to re-base the delta stream\n");
-                gNeedLcdFull = true;
+                gLcdWantFull = true;
             }
 
             // Write off a request whose reply never came, and re-base with a full frame — after a
-            // lost reply the delta stream has no valid base anyway. Without this, gLcdPending
+            // lost reply the delta stream has no valid base anyway. Without this, the pending flag
             // latched on forever and the display went permanently stale.
-            if (gLcdPending && ((get_time_ms() - gLcdReqMs) >= LCD_REQUEST_TIMEOUT_MS)) {
+            if (gLcdPendingOwn && ((get_time_ms() - gLcdReqMsOwn) >= LCD_REQUEST_TIMEOUT_MS)) {
                 LOG_ERROR("LCD request timed out after %.0fms — re-basing with a full frame\n",
-                          get_time_ms() - gLcdReqMs);
-                gLcdPending  = false;
-                gNeedLcdFull = true;
+                          get_time_ms() - gLcdReqMsOwn);
+                // gLcdInFlightOwn is deliberately NOT decremented: the reply we gave up on is still
+                // coming, and recognising it by its sequence id when it lands is the point.
+                gLcdPendingOwn = false;
+                atomic_store(&gLcdOutstandingValid, false);
+                gLcdWantFull   = true;
             }
 
-            if (gNeedLeds) {
+            // One trailing delta once the burst stops, so the display ends up on the same value the
+            // hardware landed on. Without it the last request of a burst can be answered before the
+            // device finished acting on the final event, and nothing asks again.
+            if (  !gLcdSettledOwn && !gLcdPendingOwn && !gDialDragActive
+               && !gLcdWantFull && !gLcdWantDelta
+               && ((get_time_ms() - gLastUiEventMs) >= LCD_SETTLE_MS)) {
+                gLcdWantDelta  = true;
+                gLcdSettledOwn = true;
+            }
+
+            // The LED request shares the link with the LCD transfer, so it waits its turn too —
+            // firing one mid-transfer only lengthens the round trip everything else is queued behind.
+            if (gLcdWantLeds && !gLcdPendingOwn) {
                 extern void peptalk_send_led_state_request(void);
+                gLcdWantLeds = false;
                 peptalk_send_led_state_request();
-                gNeedLeds = false;
-            } else if (!gLcdPending) {
-                // Set the flag *before* sending so a fast response cannot clear
-                // it before we have a chance to set it (race on USB round-trip).
-                if (gNeedLcdFull) {
-                    extern void peptalk_send_lcd_dump_request(void);
-                    gLcdReqMs    = get_time_ms();
-                    gLcdPending  = true;
-                    gNeedLcdFull = false;
-                    peptalk_send_lcd_dump_request();
-                } else if (gNeedLcdDelta) {
-                    extern void peptalk_send_lcd_delta_request(void);
-                    gLcdReqMs     = get_time_ms();
-                    gLcdPending   = true;
-                    gNeedLcdDelta = false;
-                    peptalk_send_lcd_delta_request();
+            } else if (!gLcdPendingOwn) {
+                extern void peptalk_send_lcd_dump_request(void);
+                extern void peptalk_send_lcd_delta_request(void);
+                extern uint8_t peptalk_last_request_seq(void);
+
+                // Marked pending BEFORE sending, so a reply that arrives while we are still in this
+                // block cannot be mistaken for there being nothing outstanding.
+                if (gLcdWantFull || gLcdWantDelta) {
+                    bool full = gLcdWantFull;
+
+                    gLcdWantFull   = false;
+                    gLcdWantDelta  = false;   // a full frame answers a pending delta too
+                    gLcdReqMsOwn   = get_time_ms();
+                    gLcdPendingOwn = true;
+                    gLcdInFlightOwn++;
+
+                    if (full) {
+                        peptalk_send_lcd_dump_request();
+                    } else {
+                        peptalk_send_lcd_delta_request();
+                    }
+                    atomic_store(&gLcdOutstandingSeq, peptalk_last_request_seq());
+                    atomic_store(&gLcdOutstandingValid, true);
                 }
             }
         }
         // Drive this thread's CFRunLoop so the midi_notify_cb fires here.
         // Use a short interval when work is in progress, idle at ~30 Hz otherwise.
-        bool   busy    = gLcdPending
-                         || gNeedLcdFull
-                         || gNeedLcdDelta
+        bool   busy    = gLcdPendingOwn
+                         || gLcdWantFull
+                         || gLcdWantDelta
                          || gDialDragActive;
         double seconds = busy ? 0.005 : 0.033;
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, seconds, false);

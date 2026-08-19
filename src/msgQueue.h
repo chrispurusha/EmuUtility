@@ -44,7 +44,10 @@ typedef enum {
     eMsgCmdSessionOpen,
     eMsgCmdButtonEvent,    // buttonEventData
     eMsgCmdRotaryEvent,    // rotaryEventData
-    eMsgCmdNoteEvent       // noteEventData: a MIDI note from the computer-keyboard note entry
+    eMsgCmdNoteEvent,      // noteEventData: a MIDI note from the computer-keyboard note entry
+    eMsgCmdLcdRefresh,     // lcdRefreshData: somebody wants the display re-read
+    eMsgCmdLcdReply,       // lcdReplyData: a reply landed; only the MIDI thread may act on that
+    eMsgCmdUiActivity      // the user touched something; starts the settle timer
 } eMsgCmd;
 
 // Posted by the CoreMIDI read callback, acted on by the MIDI thread: the callback only validates and
@@ -72,6 +75,26 @@ typedef struct {
     bool    on;
 } tNoteEventData;
 
+// Posted by anyone who wants the display re-read. It is a REQUEST, not a flag write: the MIDI thread
+// keeps the actual want-bits, so N of these still collapse into one transfer while nothing can lose
+// an update the way a boolean set by one thread and cleared by another can.
+typedef struct {
+    bool full;     // a whole frame is needed
+    bool delta;    // a delta will do
+    bool leds;     // the LED state is wanted too
+} tLcdRefreshData;
+
+// Posted by the CoreMIDI read callback once it has done the part it owns — validating the reply and
+// writing the pixels. Everything the reply implies for the REQUEST state (what is still in flight,
+// whether another transfer is owed) is decided by the MIDI thread from this message, because that
+// thread owns it. Mirrors how tIdentityReplyData splits the same way.
+typedef struct {
+    uint8_t seq;             // the sequence id the reply carried
+    bool    stale;           // did not match the outstanding request; pixels untouched
+    bool    wasFullFrame;    // a whole frame, so the delta stream is re-based
+    bool    needsFullFrame;  // the payload was unusable; only a full frame can put it right
+} tLcdReplyData;
+
 typedef struct {
     uint32_t cmd;
     union {
@@ -79,6 +102,8 @@ typedef struct {
         tButtonEventData   buttonEventData;
         tRotaryEventData   rotaryEventData;
         tNoteEventData     noteEventData;
+        tLcdRefreshData    lcdRefreshData;
+        tLcdReplyData      lcdReplyData;
     };
 } tMessageContent;
 

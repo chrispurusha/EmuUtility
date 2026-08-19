@@ -52,6 +52,10 @@ uint32_t peptalk_unpack_7bit(const uint8_t * src, uint32_t srcLen, uint8_t * dst
 // frame, because nothing short of one can put the picture right. Caller holds gLcdMutex.
 bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen);
 
+// The sequence id the last LCD request went out with. MIDI thread only — it hands this to the
+// outstanding-request state so a reply can be matched to the request that asked for it.
+uint8_t peptalk_last_request_seq(void);
+
 #ifdef __cplusplus
 }
 #endif

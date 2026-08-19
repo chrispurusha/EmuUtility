@@ -149,7 +149,7 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
             glfwSetInputMode(win, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
         }
         gDialDragActive = false;
-        gNeedLcdFull    = true; // final full sync supersedes the throttled polling done during the drag
+        midi_post_lcd_refresh(true); // final full sync supersedes the throttled polling done during the drag
         synthlib_request_redraw();
         return;
     }
@@ -297,7 +297,8 @@ void handle_key(void * win, int key, int scancode, int action, int mods) {
     if (found) {
         midi_post_button_event(bk, true);
         midi_post_button_event(bk, false);
-        gNeedLcdDelta = true;   // a delta, for the reasons emu_button_press() gives
+        midi_post_lcd_refresh(false);   // a delta, for the reasons emu_button_press() gives
+        midi_note_ui_activity();
         synthlib_request_redraw();
     }
 }
@@ -311,7 +312,8 @@ void handle_scroll(void * win, double dx, double dy) {
     }
     int delta = (int)(dy * 3.0);
     midi_post_rotary_event(delta);
-    gNeedLcdDelta = true;
+    midi_post_lcd_refresh(false);
+    midi_note_ui_activity();   // scroll-wheel turns settle like any other input
     synthlib_request_redraw();
 }
 

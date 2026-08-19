@@ -254,6 +254,7 @@ void dial_nudge(int delta) {
 
     if (gSessionOpen) {
         midi_post_rotary_event(delta);
+        midi_note_ui_activity();   // the drag's own 120 ms polling stops at release; this catches the landing point
         // No LCD request here — while a drag is active, the MIDI poll
         // thread already polls for a delta on its own throttled cadence
         // (see gDialDragActive), independent of individual ticks.
@@ -382,8 +383,9 @@ void emu_button_press(tButtonKey key, bool pressed) {
         return;
     }
     LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
-    btn->pressed  = pressed;
+    btn->pressed = pressed;
     midi_post_button_event(btn->key, pressed);
+    midi_note_ui_activity();   // so one trailing delta lands after the burst; see LCD_SETTLE_MS
     // A DELTA, not a full dump. A full frame is 2205 bytes on a 31250-baud DIN link — measured at
     // 714-874 ms per press on a real E5000 — where the delta for a typical change is 377 bytes and
     // 256 ms. Even a whole-page change is no worse: the device simply answers with the whole frame
@@ -394,7 +396,7 @@ void emu_button_press(tButtonKey key, bool pressed) {
     // risk is not new here — the dial drag has always driven an unbounded stream of them — and it
     // is answered directly by the idle resync in midi_thread(), which re-bases the frame once the
     // display has been quiet for LCD_RESYNC_IDLE_MS. See globalVars.h (gLcdBaseTrusted).
-    gNeedLcdDelta = true;
+    midi_post_lcd_refresh(false);
     synthlib_request_redraw();
 }
 

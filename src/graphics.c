@@ -478,6 +478,17 @@ static void backdoor_dump_state(char * out, size_t outMax) {
     used += (size_t)snprintf(out + used, outMax - used, "noteEntryFirstNote=%u\n",
                              (unsigned)note_entry_first_note());
 
+    // The render->framebuffer factor, so a scripted click can turn any rectangle reported below into
+    // a real screen coordinate: framebuffer px = render units * guiScale, screen points = that / the
+    // display's backing scale, offset by the window's content origin.
+    used += (size_t)snprintf(out + used, outMax - used, "guiScale=%.4f render=%dx%d\n",
+                             gGlobalGuiScale, get_render_width(), get_render_height());
+
+    tRectangle dial = emu_dial_rect();
+
+    used += (size_t)snprintf(out + used, outMax - used, "dial rect=%.1f,%.1f %.1fx%.1f\n",
+                             dial.coord.x, dial.coord.y, dial.size.w, dial.size.h);
+
     tRectangle lcd  = emu_lcd_rect();
 
     used += (size_t)snprintf(out + used, outMax - used, "lcd rect=%.1f,%.1f %.1fx%.1f refresh=%u\n",
@@ -580,8 +591,7 @@ static void backdoor_dispatch(const char * cmd, const char * arg, GLFWwindow * w
         synthlib_request_redraw();
         backdoor_write_result("OK\n");
     } else if (strcmp(cmd, "REFRESH") == 0) {
-        gNeedLcdFull  = true;
-        gNeedLcdDelta = false;
+        midi_post_lcd_refresh(true);
         backdoor_write_result("OK\n");
     } else if (strcmp(cmd, "STATE") == 0) {
         char dump[8192];

@@ -74,8 +74,29 @@
 // or corrupted response left it set forever and the display simply stopped updating, with no error
 // and no way back short of a restart. That mattered less when every update was a full frame the
 // user was already waiting on; it matters more now the delta stream is the normal path. Comfortably
-// clear of the worst round trip measured (1119 ms for a full frame queued behind a delta).
-#define LCD_REQUEST_TIMEOUT_MS    (3000.0)
+// clear of the worst round trip measured.
+//
+// Raised 3000 -> 8000 on 2026-08-20. At 3 s it was firing on responses that were merely SLOW, not
+// lost — under load (an unsolicited session status forcing a full frame, an LED request sharing the
+// link) a reply can take well over 3 s. Timing one out issues a second request while the first is
+// still on its way, and the late reply is then read as the answer to the new one: a stale delta gets
+// applied to a frame that has moved on. That was measured corrupting 295 to 1286 of 1920 bytes. The
+// gLcdInFlight counter makes that safe even when it does happen; this just stops it happening for
+// no reason.
+#define LCD_REQUEST_TIMEOUT_MS    (8000.0)
+
+// How long after the last button press or dial detent to take ONE more delta.
+//
+// Every other refresh in this app is triggered BY an event, and its request goes out in the same
+// breath as the event that caused it — so the last request of a burst can be answered before the
+// device has finished acting on the final event, and then nothing asks again. The display sits one
+// step behind the hardware until the 5 s resync, which is far too slow to read as responsive. This
+// is the trailing request that catches the landing point: the dial's own 120 ms polling stops dead
+// when the drag ends, and coalesced Inc/Dec presses have the same gap.
+//
+// Comfortably past the device's own turnaround (~130 ms fixed overhead, measured), while still
+// feeling immediate. Costs one small delta (~200 ms) per burst, not per event.
+#define LCD_SETTLE_MS    (250.0)
 
 // ── Computer-keyboard note entry ─────────────────────────────────────────────
 // Notes go out as ordinary MIDI, not PEPTALK: PEPTALK drives the front panel, and a note is not a

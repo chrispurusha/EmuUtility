@@ -22,6 +22,7 @@
 
 #include "sysIncludes.h"
 #include "types.h"
+#include "msgQueue.h"   // tLcdReplyData, for the callback thread's reply hand-off
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,6 +60,25 @@ void midi_post_session_open(void);
 // A MIDI Note On/Off for the computer-keyboard note entry (noteEntry.c). Ordinary channel-voice
 // MIDI rather than PEPTALK — see NOTE_ENTRY_MIDI_CHANNEL in defs.h.
 void midi_post_note_event(uint8_t note, uint8_t velocity, bool on);
+
+// Record that the user just did something that may change the display, so the MIDI thread takes one
+// more delta once the burst stops. Call alongside any button or dial event — see LCD_SETTLE_MS.
+void midi_note_ui_activity(void);
+
+// Ask for the display to be re-read: a whole frame, or a delta if that will do. Safe from any
+// thread. This is a REQUEST rather than a flag write on purpose — the want-bits belong to the MIDI
+// thread, so nothing can clear one that was never served. See tLcdRefreshData.
+void midi_post_lcd_refresh(bool full);
+
+// Ask for the front-panel LED state. Safe from any thread, same reasoning as the refresh above.
+void midi_post_led_refresh(void);
+
+// Hand the MIDI thread the outcome of an LCD reply the CoreMIDI callback has already dealt with.
+void midi_post_lcd_reply(const tLcdReplyData * reply);
+
+// The sequence id of the LCD request currently outstanding, for the callback thread's staleness
+// check. Written only by the MIDI thread. Returns false when nothing is outstanding.
+bool midi_outstanding_lcd_seq(uint8_t * seqOut);
 
 // Send MIDI Identity Request to all outputs to discover connected devices. MIDI-THREAD ONLY.
 void midi_send_identity_request(void);
