@@ -27,19 +27,21 @@
 extern "C" {
 #endif
 
-void handle_mouse_button(void * win, int button, int action, int mods, double x, double y);
+// Normalised input handlers, registered with SynthLib via tSynthLibInputHandlers — the coordinate
+// arrives already scaled and the button already decoded. See synthlibWindow.h.
+void handle_mouse_button(tCoord coord, tMouseButton button, int mods);
 
 // Arms the dial-drag state (gDialDrag et al, private to mouseHandle.c) on press;
 // registered by emuGraphics.cpp's render_dial_knob() as the dial's click region.
 // Release is handled separately, earlier in handle_mouse_button() — see there.
 void dial_press_click_handler(tCoord coord, eClickPhase phase, void * userData);
-void handle_cursor_pos(void * win, double x, double y);
-void handle_key(void * win, int key, int scancode, int action, int mods);
+void handle_cursor_pos(tCoord coord);
+void handle_key(int key, int scancode, int action, int mods);
 
 // Ends a dial drag whose mouse release never arrived. Call once per frame — it no-ops unless the
 // drag flag is genuinely stuck. See its definition for why a stuck flag is worse than a stuck cursor.
 void recover_lost_dial_drag(void * win);
-void handle_scroll(void * win, double dx, double dy);
+void handle_scroll(double dx, double dy);
 
 // Supplied for SynthLib's contextMenu.c to link against — current mouse
 // position in the same logical (render-scaled) space menu coords are opened

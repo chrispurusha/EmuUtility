@@ -88,47 +88,25 @@ void set_window_title(const char * filePath) {
     glfwSetWindowTitle((GLFWwindow *)synthlib_window(), newTitle);
 }
 
-static void window_refresh_cb(GLFWwindow * win) {
-    (void)win;
+static void on_window_refresh(void) {
     synthlib_request_redraw();
 }
 
-static void mouse_button_cb(GLFWwindow * win, int button, int action, int mods) {
-    double x = 0.0;
-    double y = 0.0;
+// Focus is a HANDLER rather than a bare shim: this app does real work on it — backing off the LCD
+// polling while nobody is looking (LCD_UNFOCUSED_PROBE_MS) and releasing any held notes — so it
+// keeps a function of its own, in SynthLib's normalised form.
+static void on_window_focus(bool focused) {
+    midi_set_window_focused(focused);
 
-    glfwGetCursorPos(win, &x, &y);
-    handle_mouse_button(win, button, action, mods, x, y);
-    synthlib_request_redraw();
-}
-
-static void cursor_pos_cb(GLFWwindow * win, double x, double y) {
-    handle_cursor_pos(win, x, y);
-}
-
-// The key-up half of a held key goes to whoever has focus, so a note started here and finished in
-// another application would never be released — and a stuck note on a real sampler keeps sounding
-// until something else stops it.
-static void window_focus_cb(GLFWwindow * win, int focused) {
-    (void)win;
-
-    // Back off the LCD polling while nobody is looking — see LCD_UNFOCUSED_PROBE_MS.
-    midi_set_window_focused(focused != GLFW_FALSE);
-
-    if (focused == GLFW_FALSE) {
+    if (!focused) {
         note_entry_all_notes_off();
     }
 }
 
-static void key_cb(GLFWwindow * win, int key, int scancode, int action, int mods) {
-    handle_key(win, key, scancode, action, mods);
-    synthlib_request_redraw();
-}
-
-static void scroll_cb(GLFWwindow * win, double dx, double dy) {
-    handle_scroll(win, dx, dy);
-    synthlib_request_redraw();
-}
+// The shims that used to sit here — fetch the cursor, scale it, decode the button, call the handler,
+// request a redraw — are SynthLib's now, written once for all three editors. See
+// tSynthLibInputHandlers in synthlibWindow.h. They also do something this app's own versions never
+// did: update the modifier state from the GLFW mods before the handler runs.
 
 // ── Wake (called from MIDI thread) ───────────────────────────────────────────
 
@@ -217,14 +195,15 @@ void init_graphics(void) {
             .backgroundGrey = (tRgb)RGB_BACKGROUND_GREY,
         },
         .mouseCoord   = get_global_gui_scaled_mouse_coord,
-    }, &(tSynthLibWindowCallbacks){
-        .key           = key_cb,
-        .cursorPos     = cursor_pos_cb,
-        .mouseButton   = mouse_button_cb,
-        .scroll        = scroll_cb,
-        .windowFocus   = window_focus_cb,
-        .windowRefresh = window_refresh_cb,
-    });
+        .handlers     = &(const tSynthLibInputHandlers){
+            .mouseButton   = handle_mouse_button,
+            .cursorPos     = handle_cursor_pos,
+            .key           = handle_key,
+            .scroll        = handle_scroll,
+            .windowFocus   = on_window_focus,
+            .windowRefresh = on_window_refresh,
+        },
+    }, NULL);
 
     init_font();        // TODO - G2 edit could benefit from this if we're loading multiple fonts
     init_lcd_texture();
@@ -601,11 +580,11 @@ static void backdoor_dispatch(const char * cmd, const char * arg, GLFWwindow * w
         bool up       = (parsed < 2) || (strcasecmp(phase, "up") == 0);
 
         if (down) {
-            handle_key(win, glfwKey, 0, GLFW_PRESS, 0);
+            handle_key(glfwKey, 0, GLFW_PRESS, 0);
         }
 
         if (up) {
-            handle_key(win, glfwKey, 0, GLFW_RELEASE, 0);
+            handle_key(glfwKey, 0, GLFW_RELEASE, 0);
         }
         synthlib_request_redraw();
         backdoor_write_result("OK\n");

@@ -56,24 +56,18 @@ void get_global_gui_scaled_mouse_coord(tCoord * coord) {
 }
 
 // Scale a window-space delta to logical-space delta
-static double delta_to_logical(void * win, double winDelta, bool isX) {
-    int winW = 0;
-    int winH = 0;
-
-    glfwGetWindowSize(win, &winW, &winH);
-
-    if (isX) {
-        return (winW > 0) ? (winDelta / winW) * (get_render_width() / gGlobalGuiScale) : winDelta;
-    } else {
-        return (winH > 0) ? (winDelta / winH) * (get_render_height() / gGlobalGuiScale) : winDelta;
-    }
-}
+// delta_to_logical() removed: the cursor handler receives logical coordinates now, so a delta of
+// two of them is already logical. See gDialPrevX/gDialPrevY.
 
 #define GLFW_CURSOR             0x00033001
 #define GLFW_CURSOR_NORMAL      0x00034001
 #define GLFW_CURSOR_DISABLED    0x00034003
 
 static bool   gDialDrag      = false;
+// LOGICAL coordinates, not window pixels — the cursor handler is handed logical ones now. The
+// distinction does not change the drag: window_to_logical is a linear scale with no offset, so the
+// difference of two logical coordinates equals the converted difference of two window ones, which is
+// exactly what delta_to_logical() used to compute for this.
 static double gDialPrevX     = 0.0; // previous cursor x — used for horizontal delta
 static double gDialPrevY     = 0.0; // previous cursor y — used for vertical delta
 static double gDialAccum     = 0.0;
@@ -88,7 +82,13 @@ void dial_press_click_handler(tCoord coord, eClickPhase phase, void * userData) 
     }
     gDialDrag       = true;
     gDialAccum      = 0.0;
-    glfwGetCursorPos((GLFWwindow *)synthlib_window(), &gDialPrevX, &gDialPrevY);
+    {
+        tCoord start = {0};
+
+        get_global_gui_scaled_mouse_coord(&start);   // logical, to match the handler
+        gDialPrevX = start.x;
+        gDialPrevY = start.y;
+    }
     gDialDragActive = true;
     gLastLcdPollMs  = get_time_ms(); // first poll can fire as soon as the interval elapses
 
@@ -143,18 +143,18 @@ void recover_lost_dial_drag(void * win) {
     end_dial_drag(win);
 }
 
-void handle_mouse_button(void * win, int button, int action, int mods, double x, double y) {
+// The coordinate arrives already scaled and the button already decoded — SynthLib's shim does both,
+// and updates the modifier state before this runs, which the hand-written shim here never did. See
+// tSynthLibInputHandlers in synthlibWindow.h.
+void handle_mouse_button(tCoord coord, tMouseButton button, int mods) {
     (void)mods;
 
-    if (button != 0) {   // left button only
-        return;
+    if ((button != mouseButtonLeftDown) && (button != mouseButtonLeftUp)) {
+        return;   // left button only
     }
-    tCoord coord   = synthlib_window_to_logical(x, y);
+    bool pressed = (button == mouseButtonLeftDown);
 
-    bool   pressed = (action == 1);      // GLFW_PRESS == 1
-
-    LOG_DEBUG("mouse %s win(%.0f,%.0f) logical(%.0f,%.0f)\n",
-              pressed ? "press" : "release", x, y, coord.x, coord.y);
+    LOG_DEBUG("mouse %s logical(%.0f,%.0f)\n", pressed ? "press" : "release", coord.x, coord.y);
 
     // A release that ends an active dial drag takes priority over other click
     // routing below (context menu, buttons) — the drag consumes the release
@@ -169,7 +169,7 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     // land a pixel or two off from each other. Harmless there in practice
     // since there's only the one dial on screen, but no reason to keep it.
     if (!pressed && gDialDrag) {
-        end_dial_drag(win);
+        end_dial_drag(synthlib_window());
         return;
     }
 
@@ -209,7 +209,7 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     LOG_DEBUG("no click region at logical(%.0f,%.0f)\n", coord.x, coord.y);
 }
 
-void handle_cursor_pos(void * win, double x, double y) {
+void handle_cursor_pos(tCoord coord) {
     if (!gDialDrag) {
         return;
     }
@@ -219,7 +219,6 @@ void handle_cursor_pos(void * win, double x, double y) {
         // the encoder at the same angular rate, without pinning the indicator
         // to the raw mouse angle (there's no fixed "12 o'clock = value X" on a
         // real endless encoder, so snapping to the click position would jump).
-        tCoord coord = synthlib_window_to_logical(x, y);
         double angle = calculate_mouse_angle(coord, emu_dial_rect());
         double delta = angle - gDialPrevAngle;
 
@@ -235,19 +234,19 @@ void handle_cursor_pos(void * win, double x, double y) {
     }
 
     if (gDialSkipCount > 0) {
-        gDialPrevX = x;
-        gDialPrevY = y;
+        gDialPrevX = coord.x;
+        gDialPrevY = coord.y;
         gDialSkipCount--;
         return;
     }
 
     if (synthlib_dial_mode() == eDialModeHorizontal) {
-        gDialAccum += delta_to_logical(win, x - gDialPrevX, true) * 0.25;
-        gDialPrevX  = x;
+        gDialAccum += (coord.x - gDialPrevX) * 0.25;
+        gDialPrevX  = coord.x;
     } else {
         // Drag up = positive delta (increment)
-        gDialAccum += delta_to_logical(win, gDialPrevY - y, false) * 0.25;
-        gDialPrevY  = y;
+        gDialAccum += (gDialPrevY - coord.y) * 0.25;
+        gDialPrevY  = coord.y;
     }
     int steps = (int)gDialAccum;
 
@@ -257,8 +256,7 @@ void handle_cursor_pos(void * win, double x, double y) {
     }
 }
 
-void handle_key(void * win, int key, int scancode, int action, int mods) {
-    (void)win;
+void handle_key(int key, int scancode, int action, int mods) {
     (void)scancode;
 
     // Note entry comes first, and gets releases as well as presses — a note has to be let go of.
@@ -324,8 +322,7 @@ void handle_key(void * win, int key, int scancode, int action, int mods) {
     }
 }
 
-void handle_scroll(void * win, double dx, double dy) {
-    (void)win;
+void handle_scroll(double dx, double dy) {
     (void)dx;
 
     if (dy == 0.0) {

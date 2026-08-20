@@ -20,6 +20,7 @@
 #include "sysIncludes.h"
 #include "defs.h"
 #include "synthlibDefs.h"
+#include "synthlibMidi.h"   // AFTER defs.h — synthlibDefs.h gates its colours on the app macro
 #include "types.h"
 #include "globalVars.h"
 #include "utils.h"
@@ -32,7 +33,7 @@
 
 static void (*gWakeCb)(void) = NULL;
 static pthread_t            gMidiThread  = 0;
-static pthread_mutex_t      gSendMutex   = PTHREAD_MUTEX_INITIALIZER;
+// gSendMutex moved into SynthLib with the send primitive it guarded — see synthlibMidi.c.
 
 // The MIDI thread's own CFRunLoop, captured once the thread is up. Posting a command signals it so
 // the drain happens promptly instead of waiting out the current CFRunLoopRunInMode interval (up to
@@ -317,27 +318,12 @@ static void sysex_reset_all(void) {
 
 // ── Internal send to a specific destination ───────────────────────────────────
 
-static void midi_send_to(const uint8_t * data, uint32_t length, MIDIEndpointRef dest) {
-    if ((gMidiOutPort == 0) || (dest == 0) || (data == NULL) || (length == 0)) {
-        return;
-    }
-    uint8_t          buf[512 + sizeof(MIDIPacketList)];
-    MIDIPacketList * pktList = (MIDIPacketList *)buf;
-    MIDIPacket *     pkt     = MIDIPacketListInit(pktList);
-
-    pkt = MIDIPacketListAdd(pktList, sizeof(buf), pkt, 0, length, data);
-
-    if (pkt == NULL) {
-        LOG_ERROR("MIDIPacketListAdd failed (message too long?)\n");
-        return;
-    }
-    pthread_mutex_lock(&gSendMutex);
-    OSStatus         err     = MIDISend(gMidiOutPort, dest, pktList);
-    pthread_mutex_unlock(&gSendMutex);
-
-    if (err != noErr) {
-        LOG_ERROR("MIDISend error %d\n", (int)err);
-    }
+static bool midi_send_to(const uint8_t * data, uint32_t length, MIDIEndpointRef dest) {
+    // THE PACKING AND THE SEND ARE SHARED NOW — see SynthLib's synthlibMidi.h. Both editors carried
+    // their own copy of this, character-identical apart from a log string, and differing only in the
+    // two ways that had already caused a real fault here: a 512-byte stack buffer that silently
+    // failed a whole-bank restore, and no return value for the caller to notice with.
+    return synthlib_midi_send_to(data, length, dest);
 }
 
 // ── Identity reply ────────────────────────────────────────────────────────────
@@ -1376,6 +1362,10 @@ static void * midi_thread(void * arg) {
         return NULL;
     }
     err = MIDIOutputPortCreate(gMidiClient, CFSTR("EmuUtility Out"), &gMidiOutPort);
+
+    // Hand the port to the shared send primitive (synthlibMidi.h); creating and naming it stays
+    // here, inside the connect logic that is deliberately not shared.
+    synthlib_midi_set_out_port(gMidiOutPort);
 
     if (err != noErr) {
         LOG_ERROR("MIDIOutputPortCreate failed: %d\n", (int)err);
