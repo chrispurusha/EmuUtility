@@ -417,29 +417,34 @@ void emu_button_press(tButtonKey key, bool pressed) {
     }
     LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
     btn->pressed = pressed;
-    midi_post_button_event(btn->key, pressed);
 
-    // Only the PRESS counts as activity. The release is the tail of the same gesture and changes
+    // Stamped BEFORE the button event is posted, not after.
+    //
+    // Only the PRESS counts as activity — the release is the tail of the same gesture and changes
     // nothing further, but stamping it restarts the settle timer AND makes every reply in flight
-    // look superseded — which quietly forced a whole frame for every button press, defeating the
-    // cheap delta this split exists to use.
+    // look superseded.
+    //
+    // The ORDER matters because this is also what restarts the idle probe clock (see
+    // eMsgCmdUiActivity). The MIDI thread can drain the queue and reach its polling decisions
+    // between any two posts, so posting the button event first left a window in which an idle probe
+    // went out on top of a press — and the whole frame the press actually wanted then had to queue
+    // behind that probe's reply. Restarting the clock first closes the window: by the time the
+    // button event reaches the wire, the poll has already been told to stand down.
     if (pressed) {
         midi_note_ui_activity();
     }
-    // A DELTA, not a full dump. A full frame is 2205 bytes on a 31250-baud DIN link — measured at
-    // 714-874 ms per press on a real E5000 — where the delta for a typical change is 377 bytes and
-    // 256 ms. Even a whole-page change is no worse: the device simply answers with the whole frame
-    // when the delta would not be smaller, so asking for a delta never costs more than asking for
-    // the frame.
+    midi_post_button_event(btn->key, pressed);
+
+    // A WHOLE FRAME, not a delta and not a probe.
     //
-    // This used to force a full dump on the grounds that deltas compound errors. They do, but that
-    // risk is not new here — the dial drag has always driven an unbounded stream of them — and it
-    // is answered directly by the idle resync in midi_thread(), which re-bases the frame once the
-    // display has been quiet for LCD_RESYNC_IDLE_MS. See globalVars.h (gLcdBaseTrusted).
-    // Always ask for a delta; whether one is actually safe is a question of TIMING, not of which
-    // button was pressed, and the MIDI thread decides that from the gap between input events. An
-    // isolated Inc is as safe as a function key; a rapid run of either is not. See LCD_STREAM_GAP_MS.
-    midi_post_lcd_refresh(false);
+    // Polling exists to answer "has the screen moved?". We just pressed a button, so it has —
+    // there is nothing to find out, and the only open question is what it now shows, which only a
+    // whole frame is allowed to answer (see LCD_USE_DELTAS). Asking for a delta here meant that
+    // after LCD_RESYNC_IDLE_MS of quiet — an ordinary isolated press — the request went out as a
+    // probe whose payload is deliberately discarded, with the frame we actually wanted following
+    // behind it: two round trips on a 31250-baud link for one press, the second unable to start
+    // until the first had finished.
+    midi_post_lcd_refresh(true);
     synthlib_request_redraw();
 }
 

@@ -325,10 +325,12 @@ void handle_key(void * win, int key, int scancode, int action, int mods) {
     }
 
     if (found) {
+        // Activity first, then the command, then the refresh — a keypress is a button press by
+        // another route and follows the same order and the same reasoning; see emu_button_press().
+        midi_note_ui_activity();
         midi_post_button_event(bk, true);
         midi_post_button_event(bk, false);
-        midi_post_lcd_refresh(false);   // timing decides whether a delta is safe; see emu_button_press()
-        midi_note_ui_activity();
+        midi_post_lcd_refresh(true);    // the screen certainly moved, so fetch it rather than poll
         synthlib_request_redraw();
     }
 }
@@ -341,9 +343,11 @@ void handle_scroll(void * win, double dx, double dy) {
         return;
     }
     int delta = (int)(dy * 3.0);
+
+    midi_note_ui_activity();   // scroll-wheel turns settle like any other input — and stand the poll
+                               // down before the event goes out, as emu_button_press() explains
     midi_post_rotary_event(delta);
-    midi_post_lcd_refresh(false);
-    midi_note_ui_activity();   // scroll-wheel turns settle like any other input
+    midi_post_lcd_refresh(true);
     synthlib_request_redraw();
 }
 

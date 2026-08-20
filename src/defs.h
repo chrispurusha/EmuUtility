@@ -201,10 +201,10 @@
 // Two input events closer together than this mean the user is STREAMING — holding Inc, or working
 // the dial — rather than making one discrete change.
 //
-// This is the real distinction, and it is about timing rather than which control was used: an
-// isolated Inc press is as safe for a delta as a function key, while a rapid run of them is exactly
-// the case where a delta lands describing a screen that has already moved on. Whole frames are used
-// while streaming, deltas otherwise.
+// Input-driven refreshes are whole frames either way now — an event is proof the screen moved, so
+// there is nothing left to poll for and a delta only adds a round trip in front of the frame we
+// actually want (see emu_button_press). What this still decides is whether the press settle applies:
+// there is a settled state to wait for after one discrete change, and none in the middle of a run.
 #define LCD_STREAM_GAP_MS    (400.0)
 
 // How long to wait after an input before asking the device what its screen now shows.
@@ -244,7 +244,8 @@
 // when the drag ends, and coalesced Inc/Dec presses have the same gap.
 //
 // Comfortably past the device's own turnaround (~130 ms fixed overhead, measured), while still
-// feeling immediate. Costs one small delta (~200 ms) per burst, not per event.
+// feeling immediate. Costs one read (~715 ms, a whole frame under LCD_USE_DELTAS) per burst, not
+// per event.
 #define LCD_SETTLE_MS    (250.0)
 
 // How many times in a row the display may be re-read purely because the LAST read showed it moving.

@@ -487,16 +487,16 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
 
         case PEPTALK_BUTTON_EVENT:
         {
-            // A delta, for the same reason emu_button_press() asks for one; the idle resync in
-            // midi_thread() is what guarantees the frame is eventually re-based.
-            midi_post_lcd_refresh(false);
+            // A whole frame, for the same reason emu_button_press() asks for one: an event says the
+            // screen moved, so there is nothing left to poll for — only to fetch.
+            midi_post_lcd_refresh(true);
             synthlib_request_redraw();
             break;
         }
 
         case PEPTALK_ROTARY_EVENT:
         {
-            midi_post_lcd_refresh(false);
+            midi_post_lcd_refresh(true);
             synthlib_request_redraw();
             break;
         }
