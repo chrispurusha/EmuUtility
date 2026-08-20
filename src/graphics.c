@@ -48,6 +48,7 @@ extern "C" {
 #include "utils.h"
 #include "utilsGraphics.h"
 #include "synthlibWindow.h"
+#include "synthlibPopups.h"
 #include "emuGraphics.h"
 #include "mouseHandle.h"
 #include "menus.h"
@@ -200,6 +201,9 @@ void init_graphics(void) {
     //
     // No character callback: this app takes no text input. A NULL entry simply leaves that GLFW
     // callback unregistered.
+    // The coordinator needs the menu bar before the first frame — see synthlibPopups.h.
+    synthlib_popups_set_menu_bar(gAppMenuBar, app_menu_bar_rect);
+
     synthlib_window_create(&(tSynthLibWindowConfig){
         .title        = title,
         .targetWidth  = TARGET_FRAME_BUFF_WIDTH,
@@ -254,8 +258,12 @@ static void render_frame(GLFWwindow * win) {
     render_lcd();
     render_dial_knob();
     render_button_panel();
+    // The BAR stays here — it is chrome, and anything that floats does so above it. Everything that
+    // pops UP goes through the coordinator, ordered by layer rather than by the order of these calls.
+    // This app only has the context menu today; it gets the browsers and the alert dialog for free if
+    // it ever opens one. See synthlibPopups.h.
     render_menu_bar(gAppMenuBar, app_menu_bar_rect());
-    render_context_menu();
+    synthlib_popups_render();
 
     glfwSwapBuffers(win);
 }
@@ -900,8 +908,8 @@ void do_graphics_loop(void) {
         // another happens on hover, not just a second click — matches G2-Edit/graphics.cpp and
         // SynthEdit/graphics.cpp. Needs glfwWaitEventsTimeout() below rather than
         // glfwWaitEvents()'s indefinite block for the same reason.
-        update_context_menu_hover();
-        update_menu_bar_hover(gAppMenuBar, app_menu_bar_rect());
+        // Every registered popup's hover/dwell update in one call, so the host cannot forget one.
+        synthlib_popups_tick();
 
         bool reDraw = synthlib_consume_redraw();
 
