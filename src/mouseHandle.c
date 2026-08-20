@@ -30,6 +30,7 @@ extern "C" {
 
 #pragma clang diagnostic pop
 #include "defs.h"
+#include "inputState.h"
 #include "synthlibDefs.h"
 #include "types.h"
 #include "globalVars.h"
@@ -44,26 +45,14 @@ extern "C" {
 #include "noteEntry.h"
 
 // Convert GLFW window-space (x,y) to logical canvas coordinates.
-static tCoord window_to_logical(void * win, double x, double y) {
-    int    winW  = 0;
-    int    winH  = 0;
-
-    glfwGetWindowSize(win, &winW, &winH);
-
-    tCoord coord = {
-        .x = (winW > 0) ? (x / winW) * (get_render_width() / gGlobalGuiScale) : x,
-        .y = (winH > 0) ? (y / winH) * (get_render_height() / gGlobalGuiScale) : y,
-    };
-    return coord;
-}
+// window_to_logical() moved into SynthLib (declared in inputState.h, implemented in
+// inputStateGlfw.c): it was character-identical here and in the other editor, and inlined in
+// the third — where it had lost the divide-by-zero guard both copies here kept. SynthLib owns
+// the window, so the shared one takes no window argument.
 
 // Supplied for SynthLib's contextMenu.c to link against — see mouseHandle.h.
 void get_global_gui_scaled_mouse_coord(tCoord * coord) {
-    double x = 0.0;
-    double y = 0.0;
-
-    glfwGetCursorPos(synthlib_window(), &x, &y);
-    *coord = window_to_logical(synthlib_window(), x, y);
+    synthlib_mouse_coord(coord);   // see inputState.h
 }
 
 // Scale a window-space delta to logical-space delta
@@ -160,7 +149,7 @@ void handle_mouse_button(void * win, int button, int action, int mods, double x,
     if (button != 0) {   // left button only
         return;
     }
-    tCoord coord   = window_to_logical(win, x, y);
+    tCoord coord   = synthlib_window_to_logical(x, y);
 
     bool   pressed = (action == 1);      // GLFW_PRESS == 1
 
@@ -230,7 +219,7 @@ void handle_cursor_pos(void * win, double x, double y) {
         // the encoder at the same angular rate, without pinning the indicator
         // to the raw mouse angle (there's no fixed "12 o'clock = value X" on a
         // real endless encoder, so snapping to the click position would jump).
-        tCoord coord = window_to_logical(win, x, y);
+        tCoord coord = synthlib_window_to_logical(x, y);
         double angle = calculate_mouse_angle(coord, emu_dial_rect());
         double delta = angle - gDialPrevAngle;
 
