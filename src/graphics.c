@@ -131,12 +131,7 @@ static void setup_projection(GLFWwindow * win) {
     set_render_width(fbW);
     set_render_height(fbH);
 
-    glViewport(0, 0, fbW, fbH);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0.0, fbW, fbH, 0.0, -1.0, 1.0);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
+    render_backend_set_surface(fbW, fbH);
 }
 
 // ── Font (FreeType via system path) ──────────────────────────────────────────
@@ -216,8 +211,7 @@ void init_graphics(void) {
 static void render_frame(GLFWwindow * win) {
     setup_projection(win);
 
-    glClearColor(0.2f, 0.2f, 0.2f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    render_backend_clear((tRgb){0.2, 0.2, 0.2});
 
     clear_click_regions();
 
@@ -358,8 +352,13 @@ static void backdoor_capture(const char * path) {
         backdoor_write_result("ERROR: out of memory\n");
         return;
     }
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, pixels);
+
+    // Tight row packing, and the sheared-PNG bug behind it, are inside the backend call now.
+    if (!render_backend_read_pixels_rgb(0, 0, w, h, pixels)) {
+        free(pixels);
+        backdoor_write_result("ERROR: frame read-back failed\n");
+        return;
+    }
     stbi_flip_vertically_on_write(1);
 
     int       ok     = stbi_write_png(path, w, h, 3, pixels, w * 3);
@@ -384,11 +383,14 @@ static void backdoor_screenshot(GLFWwindow * win, const char * path) {
         backdoor_write_result("ERROR: out of memory\n");
         return;
     }
-    // Tightly-packed rows. Without this, glReadPixels' default GL_PACK_ALIGNMENT of 4 pads each row
-    // whenever w*3 isn't a multiple of 4, which both shears the PNG and overruns the buffer.
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, pixels);
-    stbi_flip_vertically_on_write(1); // GL origin is bottom-left; PNGs are top-down
+
+    // Tight row packing, and the sheared-PNG bug behind it, are inside the backend call now.
+    if (!render_backend_read_pixels_rgb(0, 0, w, h, pixels)) {
+        free(pixels);
+        backdoor_write_result("ERROR: frame read-back failed\n");
+        return;
+    }
+    stbi_flip_vertically_on_write(1); // read-back origin is bottom-left; PNGs are top-down
 
     int       ok     = stbi_write_png(path, w, h, 3, pixels, w * 3);
 
