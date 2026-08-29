@@ -43,6 +43,7 @@ extern "C" {
 #include "appMenuBar.h"
 #include "clickRegion.h"
 #include "noteEntry.h"
+#include "synthlibPopups.h"
 
 // Convert GLFW window-space (x,y) to logical canvas coordinates.
 // window_to_logical() moved into SynthLib (declared in inputState.h, implemented in
@@ -173,6 +174,32 @@ void handle_mouse_button(tCoord coord, tMouseButton button, int mods) {
         return;
     }
 
+    // A MODAL POPUP GETS THE CLICK FIRST, AND UNTIL NOW GOT IT NEVER. This app renders and ticks
+    // SynthLib's popup coordinator (synthlib_popups_render/_tick in graphics.c) but routed its
+    // CLICKS past it entirely, so a modal popup could be raised and never dismissed — the renderer
+    // switch's "will be used the next time" alert sat there with a dead OK button. Its Escape and
+    // Return are dealt with the same way in handle_key().
+    //
+    // Gated on synthlib_popups_modal_active() rather than dispatching unconditionally, which is
+    // what G2-Edit and SynthEdit do: those two have handed their menu bar and context menu to the
+    // coordinator as well, and this app has not. Gating means nothing about the existing path
+    // changes while no modal popup is up, which is almost always.
+    //
+    // handle_scroll() and handle_character() below close the same hole on the other two input
+    // channels.
+    if (synthlib_popups_modal_active()) {
+        if (!pressed) {
+            // The popup swallows this release, so a capture left armed by the press that opened it
+            // must not survive into the next gesture — same reasoning as the context-menu branch.
+            cancel_click_region_capture();
+        }
+
+        if (synthlib_popups_dispatch_click(coord, pressed ? mouseButtonLeftDown : mouseButtonLeftUp)) {
+            synthlib_request_redraw();
+            return;
+        }
+    }
+
     // Checked ahead of everything else on mouse-down — mirrors G2-Edit/mouseHandle.c's ordering,
     // since the bar itself needs first refusal on a click before it's treated as a dial/button hit
     // or as closing whatever context menu (bar dropdown or otherwise) is currently open.
@@ -259,6 +286,16 @@ void handle_cursor_pos(tCoord coord) {
 void handle_key(int key, int scancode, int action, int mods) {
     (void)scancode;
 
+    // See handle_mouse_button(): a modal popup owns the keyboard while it is up, which is what
+    // gives the alert dialog its Escape and Return. Without this, a note-entry key would play a
+    // note through a modal dialog.
+    if (synthlib_popups_modal_active()) {
+        if (synthlib_popups_dispatch_key(key, mods, action)) {
+            synthlib_request_redraw();
+        }
+        return;
+    }
+
     // Note entry comes first, and gets releases as well as presses — a note has to be let go of.
     // It returns true only for the keys it owns, so a key that plays a note never also reaches the
     // front-panel mapping below.
@@ -325,6 +362,16 @@ void handle_key(int key, int scancode, int action, int mods) {
 void handle_scroll(double dx, double dy) {
     (void)dx;
 
+    // A MODAL POPUP OWNS THE WHEEL, and here that is worth more than tidiness: a scroll in this app
+    // is not a UI gesture, it is midi_post_rotary_event() — it turns the sampler's data encoder.
+    // Without this, spinning the wheel over a modal dialog edited the instrument underneath it.
+    if (synthlib_popups_modal_active()) {
+        if (synthlib_popups_dispatch_scroll(dy)) {
+            synthlib_request_redraw();
+        }
+        return;   // consumed or not, it is not the encoder's while a dialog is up
+    }
+
     if (dy == 0.0) {
         return;
     }
@@ -335,6 +382,17 @@ void handle_scroll(double dx, double dy) {
     midi_post_rotary_event(delta);
     midi_post_lcd_refresh(true);
     synthlib_request_redraw();
+}
+
+// Text input exists in this app ONLY for whatever modal popup is up — the file browser's filename
+// field is the one that takes any. There is no app-level text entry to fall through to, so this
+// forwards and stops. Registered as .character in graphics.c; before this the GLFW callback was
+// left unregistered altogether, on the reasoning that the app takes no text, which was true of the
+// app and not of the popups it can raise.
+void handle_character(unsigned int codepoint) {
+    if (synthlib_popups_dispatch_char(codepoint)) {
+        synthlib_request_redraw();
+    }
 }
 
 #ifdef __cplusplus

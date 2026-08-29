@@ -42,6 +42,7 @@ void handle_key(int key, int scancode, int action, int mods);
 // drag flag is genuinely stuck. See its definition for why a stuck flag is worse than a stuck cursor.
 void recover_lost_dial_drag(void * win);
 void handle_scroll(double dx, double dy);
+void handle_character(unsigned int codepoint);
 
 // Supplied for SynthLib's contextMenu.c to link against — current mouse
 // position in the same logical (render-scaled) space menu coords are opened

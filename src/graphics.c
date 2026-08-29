@@ -174,8 +174,9 @@ void init_graphics(void) {
     // exactly what synthlib_window_create() registered, from the same table, so that particular
     // drift cannot happen again.
     //
-    // No character callback: this app takes no text input. A NULL entry simply leaves that GLFW
-    // callback unregistered.
+    // A character callback IS registered now. The app itself still takes no text — handle_character()
+    // does nothing but hand the codepoint to the popup coordinator, which is where the only text
+    // field this app can put on screen lives (the file browser's filename box).
     // The coordinator needs the menu bar before the first frame — see synthlibPopups.h.
     synthlib_popups_set_menu_bar(gAppMenuBar, app_menu_bar_rect);
 
@@ -196,6 +197,7 @@ void init_graphics(void) {
             .mouseButton   = handle_mouse_button,
             .cursorPos     = handle_cursor_pos,
             .key           = handle_key,
+            .character     = handle_character,
             .scroll        = handle_scroll,
             .windowFocus   = on_window_focus,
             .windowRefresh = on_window_refresh,
