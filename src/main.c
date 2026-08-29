@@ -30,6 +30,7 @@ extern "C" {
 #include "midiComms.h"
 #include "misc.h"
 #include "main.h"
+#include "prefs.h"
 
 static void signal_handler(int sigraised) {
     LOG_DEBUG("\nSig Handler!!! %d\n", sigraised);
@@ -51,6 +52,14 @@ int main(int argc, char ** argv) {
 
     init_signals();
     register_sleep_wake_notifications();
+
+    // BEFORE init_graphics(), and the order is load-bearing. The window is built differently for
+    // each render backend — OpenGL needs a GL context created alongside it, Metal needs none — so
+    // synthlib_window_create() reads the saved choice before it makes the window. Without this the
+    // read returns the default and the setting is SILENTLY IGNORED: no error, nothing in the log,
+    // both values simply give OpenGL. prefs_init() also runs from setup_main_menu() below, where it
+    // always did; it clears and re-reads, so calling it twice is harmless.
+    prefs_init("EmuUtility");
 
     init_graphics();
     setup_main_menu();

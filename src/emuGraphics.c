@@ -21,12 +21,10 @@
 extern "C" {
 #endif
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Weverything"
-#define GL_SILENCE_DEPRECATION    1
-#include <GLFW/glfw3.h>
-#pragma clang diagnostic pop
-
+// NO GRAPHICS HEADER. The LCD texture was the last thing in this file that named OpenGL —
+// it is created and uploaded through utilsGraphics.h's render_backend_texture_* calls now.
+// Losing the include is the part a compiler enforces: this file can no longer reacquire a
+// dependency on a particular graphics API by accident.
 #include <math.h>
 
 #include "defs.h"
@@ -39,7 +37,7 @@ extern "C" {
 #include "mouseHandle.h"
 #include "clickRegion.h"
 
-static GLuint   gLcdTexture  = 0;
+static uint32_t gLcdTexture  = 0;   // opaque backend handle, not a GLuint
 static uint32_t gLastRefresh = 0xFFFFFFFF;
 
 // ── Dial (large knob, right of LCD) ──────────────────────────────────────────
@@ -108,14 +106,15 @@ static uint32_t gDialValue   = 0;
 // ── LCD texture ───────────────────────────────────────────────────────────────
 
 void init_lcd_texture(void) {
-    // TODO - move into utilsGraphics
-
-    glGenTextures(1, &gLcdTexture);
-    glBindTexture(GL_TEXTURE_2D, gLcdTexture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, LCD_WIDTH, LCD_HEIGHT, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    // NULL: the texels are left undefined and filled by the first update_lcd_texture(). They can
+    // never be sampled undefined — render_lcd() updates before it draws on any frame where
+    // gLcd.refresh differs from gLastRefresh, and those differ on the very first frame (0 against
+    // the 0xFFFFFFFF gLastRefresh starts at). The texture is additionally not drawn at all until
+    // a session is open.
+    // Nearest filtering and edge clamping are what the backend gives every texture — which is
+    // what this wanted anyway, since an LCD pixel is meant to look like a pixel.
+    // Nearest: an LCD pixel is meant to look like a pixel, and this blits one texel per pixel.
+    gLcdTexture = render_backend_texture_create(LCD_WIDTH, LCD_HEIGHT, NULL, eTextureNearest);
 }
 
 static void update_lcd_texture(void) {
@@ -153,11 +152,8 @@ static void update_lcd_texture(void) {
         }
     }
 
-    // TODO - move into utilsGraphics, possibly with the above too
-    glBindTexture(GL_TEXTURE_2D, gLcdTexture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, LCD_WIDTH, LCD_HEIGHT, GL_RGBA, GL_UNSIGNED_BYTE, rgba);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    gLastRefresh = snapshotRefresh;   // matches the pixels we just uploaded, not a possibly-newer value
+    render_backend_texture_update(gLcdTexture, 0, 0, LCD_WIDTH, LCD_HEIGHT, rgba);
+    gLastRefresh    = snapshotRefresh; // matches the pixels we just uploaded, not a possibly-newer value
 }
 
 tRectangle emu_lcd_rect(void) {
