@@ -28,6 +28,7 @@ extern "C" {
 #include "types.h"
 #include "utilsGraphics.h"
 #include "contextMenu.h"
+#include "synthlibVersion.h"
 #include "alertDialog.h"
 #include "renderBackend.h"
 #include "prefs.h"
@@ -174,10 +175,31 @@ static void open_experimental_menu(tCoord anchor) {
     open_context_menu(anchor, items, 0, 0.0);
 }
 
+// ── Help menu ─────────────────────────────────────────────────────────────────
+// WHICH BUILD IS THIS. Version, compile time and the render backend in force. The backend is a
+// preference now, so "it looks wrong" and "it looks wrong on Metal" are different reports.
+static void action_about(int index) {
+    (void)index;
+    show_alert("About", synthlib_about_text("EmuUtility"));
+}
+
+static void open_help_menu(tCoord anchor) {
+    static tMenuItem items[2] = {0};
+
+    items[0] = (tMenuItem){
+        "About EmuUtility...", (tRgb)RGB_GREY_3, action_about, 0, NULL, 0, 0.0
+    };
+    items[1] = (tMenuItem){
+        NULL, (tRgb)RGB_BLACK, NULL, 0, NULL, 0, 0.0
+    };
+    open_context_menu(anchor, items, 0, 0.0);
+}
+
 tMenuBarItem gAppMenuBar[] = {
     {"Device",       open_device_menu      },
     {"Controls",     open_controls_menu    },
     {"Experimental", open_experimental_menu},
+    {"Help",         open_help_menu        },
     {NULL,           NULL                  },
 };
 
