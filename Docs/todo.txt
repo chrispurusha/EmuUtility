@@ -5,3 +5,5 @@ Measurements, reasoning and completed-work narrative go in findings.txt, NOT her
 Built-but-unchecked work goes in to-test.txt.
 
 Bugs
+
+- Adopt GenBridge's audio/MIDI selector in place of Scan Devices alone - would have made the wrong-destination bug visible instead of silent; see GenBridge findings 2026-09-02
