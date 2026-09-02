@@ -24,3 +24,41 @@ One entry per finding, newest first.
   longer had, and the panel went on saying "open".
   Verified on the real E5000: session opens on "MIDI 2", full frame in 716ms, deltas in 61ms,
   and BUTTON Master/Preset move the sampler's own display.
+
+2026-09-02  RACE CONDITION REVIEW - ONE FIX, AND A DESIGN THAT HOLDS UP
+------------------------------------------------------------
+Same method as the GenBridge, G2-Edit and SynthEdit reviews. Three threads: the GLFW render thread,
+the MIDI thread (pthread, CFRunLoop-driven), and the CoreMIDI read callback thread, which dispatches
+inline - so an incoming PEPTALK message mutates shared state on the callback thread while the render
+thread reads it.
+
+FIXED
+  - gLcd.refresh was a plain uint32_t read WITHOUT gLcdMutex by render_lcd() (emuGraphics.c:223) and
+    by the backdoor's STATE (graphics.c:661), while peptalk_handle_message() increments it under the
+    lock on the CoreMIDI thread. Now _Atomic. Reading it bare is the right call - taking the mutex
+    just to test a dirty flag would put the render thread behind the CoreMIDI thread every frame -
+    but a plain int touched by two threads is a data race whatever its practical consequence.
+
+CHECKED, AND SOUND - recorded so nobody "fixes" them:
+  - THE LCD ITSELF IS PROPERLY GUARDED. update_lcd_texture() copies gLcd.pixels out under the mutex
+    and does the expansion and the GL upload with it released; peptalk_handle_message() holds it
+    across every write. peptalk_apply_lcd_delta() documents "Caller holds gLcdMutex" and its callers
+    do - which also serialises its file-static scratch buffer, so the one thing that looks alarming
+    in it is safe for the same reason.
+  - gDevice.model[32] and gDevice.firmware[8] are char buffers shared across threads and looked like
+    the raced buffers found in GenBridge and SynthEdit. They are NEVER WRITTEN - dead fields. Worth
+    deleting some day, but not a race.
+  - The destination probe added earlier today (gProbeSeqDest, gDestProbeActive, gDestProbeNext) is
+    MIDI-thread-private throughout, and gSessionOpen is atomic.
+
+LEFT, AND JUDGED NOT WORTH RESTRUCTURING: gDevice's scalars (connected, id, family, member) are
+written as a group by handle_identity_reply() on the MIDI thread and read by the render thread for
+the status line. With no barrier between them the reader can in principle see connected == true
+before id lands, and draw a connected device with a stale id for one frame. Cosmetic, and the
+alternative - publishing the four as one atomic snapshot - is more machinery than the symptom earns.
+Noted rather than done.
+
+WHY THIS APP CAME OUT WELL: the thread ownership here was worked out deliberately (see the
+LCD-thread-ownership and "minimise shared thread flags" notes above), and it shows. The same was true
+of SynthEdit. GenBridge, which grew its worker around a processor that began single-threaded, needed
+seven fixes.
