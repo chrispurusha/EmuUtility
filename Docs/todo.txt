@@ -5,5 +5,3 @@ Measurements, reasoning and completed-work narrative go in findings.txt, NOT her
 Built-but-unchecked work goes in to-test.txt.
 
 Bugs
-
-- I can see comms to/from E5k, but nothing happening via the GUI. No display of incoming data and no keypresses actioned.

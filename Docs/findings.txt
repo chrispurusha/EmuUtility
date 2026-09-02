@@ -1,0 +1,26 @@
+EmuUtility findings
+
+Completed work, hardware measurements, and the traps that cost real time.
+One entry per finding, newest first.
+
+2026-09-02 - Nothing reached the GUI: the app was talking to the wrong MIDI destination
+  Symptom: comms visible to and from the E5000, but no LCD, no LEDs and no button ever reaching
+  the panel. STATE said "session=closed connected=yes", which is the whole bug in six words.
+  Cause: a scan broadcasts the identity request to EVERY destination, so the reply proves only
+  which SOURCE the device speaks on. handle_identity_reply() then INFERRED the destination from
+  that source's entity. On this rig the E5000's Out is on interface port "Port 2" while its In is
+  on "MIDI 2" - different entities entirely - so every PEPTALK message after the identity reply
+  went nowhere. Silent: the device answers the broadcast identity request and then never answers
+  anything again.
+  Fix: the entity's destination is now a guess that must be proved. It is tried first; if no
+  session status answers it, the remaining destinations are tried in turn until one does.
+  The session status ECHOES THE SEQUENCE ID OF THE SESSION OPEN IT ANSWERS, IN BYTE 3 - not byte 4
+  where every other PEPTALK reply carries it. Measured twice on the E5000 against opens sent with
+  deliberately different ids (0x15 and 0x5C). That is what makes the probe exact rather than a
+  race: probes may overlap on the wire and the reply still names the destination that earned it,
+  so the interval is a pacing figure and not a deadline.
+  Also fixed alongside: gSessionOpen was never cleared anywhere. After a rescan - a hub replug
+  fires one on its own - the app went on believing a session was open on a destination it no
+  longer had, and the panel went on saying "open".
+  Verified on the real E5000: session opens on "MIDI 2", full frame in 716ms, deltas in 61ms,
+  and BUTTON Master/Preset move the sampler's own display.

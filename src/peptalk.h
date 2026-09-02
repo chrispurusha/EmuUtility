@@ -29,7 +29,10 @@ extern "C" {
 
 // ── Outgoing messages ────────────────────────────────────────────────────────
 
-void peptalk_send_session_open(void);
+// Returns the sequence id the request went out with. The device ECHOES it back in the session
+// status, which is how a reply is tied to the destination the request was sent to — see the
+// destination probe in midiComms.c. Callers that do not care may ignore it.
+uint8_t peptalk_send_session_open(void);
 void peptalk_send_session_close(void);
 void peptalk_send_button_event(tButtonKey key, bool pressed);
 void peptalk_send_rotary_event(int delta);

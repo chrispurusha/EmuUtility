@@ -43,6 +43,7 @@ typedef enum {
     eMsgCmdScanDevices,    // rescan CoreMIDI and re-identify (menu action, sleep/wake, setup change)
     eMsgCmdIdentityReply,  // identityReplyData: an identity reply seen by the CoreMIDI read callback
     eMsgCmdSessionOpen,
+    eMsgCmdSessionStatus,  // sessionStatusData: the device answered a session open
     eMsgCmdButtonEvent,    // buttonEventData
     eMsgCmdRotaryEvent,    // rotaryEventData
     eMsgCmdNoteEvent,      // noteEventData: a MIDI note from the computer-keyboard note entry
@@ -65,6 +66,14 @@ typedef struct {
     uint16_t family;
     uint16_t member;
 } tIdentityReplyData;
+
+// Posted by the CoreMIDI read callback when the device answers a session open. Carries the sequence
+// id the reply echoed, which is what identifies WHICH session open it is answering — and therefore
+// which destination the device is listening on. Only the MIDI thread may act on that, because it
+// owns gMidiDest and the destination probe.
+typedef struct {
+    uint8_t seq;
+} tSessionStatusData;
 
 typedef struct {
     uint32_t key;      // tButtonKey
@@ -131,6 +140,7 @@ typedef struct {
     uint32_t cmd;
     union {
         tIdentityReplyData identityReplyData;
+        tSessionStatusData sessionStatusData;
         tButtonEventData   buttonEventData;
         tRotaryEventData   rotaryEventData;
         tNoteEventData     noteEventData;

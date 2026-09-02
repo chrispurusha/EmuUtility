@@ -316,6 +316,28 @@ static void sysex_reset_all(void) {
     memset(gSysEx, 0, sizeof(gSysEx));
 }
 
+// ── Endpoint name (diagnostics) ───────────────────────────────────────────────
+// The name CoreMIDI gives an endpoint, into a caller-supplied buffer. Only ever used for logging,
+// so a nameless endpoint yields "?" rather than a failure the caller has to handle.
+static const char * endpoint_name(MIDIEndpointRef ep, char * buf, size_t bufLen) {
+    CFStringRef name = NULL;
+
+    if (bufLen == 0) {
+        return "";
+    }
+    buf[0] = '\0';
+
+    if ((ep != 0) && (MIDIObjectGetStringProperty(ep, kMIDIPropertyName, &name) == noErr) && (name != NULL)) {
+        CFStringGetCString(name, buf, (CFIndex)bufLen, kCFStringEncodingUTF8);
+        CFRelease(name);
+    }
+
+    if (buf[0] == '\0') {
+        snprintf(buf, bufLen, "?");
+    }
+    return buf;
+}
+
 // ── Internal send to a specific destination ───────────────────────────────────
 
 static bool midi_send_to(const uint8_t * data, uint32_t length, MIDIEndpointRef dest) {
@@ -325,6 +347,39 @@ static bool midi_send_to(const uint8_t * data, uint32_t length, MIDIEndpointRef 
     // failed a whole-bank restore, and no return value for the caller to notice with.
     return synthlib_midi_send_to(data, length, dest);
 }
+
+// ── Destination probe (MIDI thread only) ─────────────────────────────────────
+//
+// WHICH DESTINATION THE SAMPLER IS ACTUALLY LISTENING ON.
+//
+// A scan broadcasts an identity request to EVERY destination, so the reply proves only which
+// SOURCE the device speaks on. handle_identity_reply() then INFERS the destination from that
+// source's entity — the right answer whenever one port's In and Out are the same physical socket
+// pair, and wrong the moment they are not. On a multi-port interface the sampler's Out can be
+// patched to one port while its In hangs off another, and then every PEPTALK message after the
+// identity reply goes into a hole.
+//
+// That failure was completely silent, and cost a whole debugging session: the device answers the
+// broadcast identity request, the app reports connected=yes, and nothing else ever happens — no
+// LCD, no LEDs, no button ever reaching the panel — because the session was never opened.
+//
+// So the entity's destination is now a GUESS THAT MUST BE PROVED. It is tried first, and if no
+// session status comes back the remaining destinations are tried one at a time until one answers.
+// The reply is the proof: only the destination the sampler is really listening on can produce it.
+//
+// WHICH probe a reply proves is read off the protocol rather than off the clock. Every session open
+// carries a sequence id, and the session status echoes it back (in byte 3 — see peptalk.c), so the
+// answer names the request that earned it. That is what makes the probe both fast and exact: the
+// opens may overlap on the wire without any risk of crediting the wrong destination, where a purely
+// time-based probe has to leave a gap longer than the worst round trip and still cannot be sure.
+static bool            gDestProbeActive   = false;
+static ItemCount       gDestProbeNext     = 0;         // next index into MIDIGetDestination()
+static double          gDestProbeLastMs   = 0.0;
+
+// Which destination each session open went to, indexed by the sequence id it went out with. Sized
+// to the whole 7-bit sequence space so an id can be used as the index directly; 0 means "no probe
+// was sent with this id", which is also what a reply to something we never sent resolves to.
+static MIDIEndpointRef gProbeSeqDest[128] = {0};
 
 // ── Identity reply ────────────────────────────────────────────────────────────
 // Split across two threads on purpose. The CoreMIDI read callback only validates and unpacks the
@@ -361,13 +416,103 @@ static void handle_identity_reply(const tIdentityReplyData * reply) {
     gMidiDest         = dest;
     atomic_store(&gSysExAcceptSrc, src);   // from here on, ignore every other device's traffic
 
-    LOG_DEBUG("Locked onto E-mu device\n");
+    {
+        char srcName[128]  = {0};
+        char destName[128] = {0};
 
-    peptalk_send_session_open();
+        // NAMED, not just numbered. An identity request goes to EVERY destination during a scan, so
+        // a reply proves only which SOURCE the device speaks on — the destination is then INFERRED
+        // from that source's entity, and an interface that does not pair them that way leaves us
+        // talking to the wrong port. That failure is completely silent: the device answers the
+        // broadcast identity request and then never answers anything again. Printing both names is
+        // what makes it visible.
+        LOG_DEBUG("Locked onto E-mu device: source '%s' (0x%08X) -> dest '%s' (0x%08X)\n",
+                  endpoint_name(src, srcName, sizeof(srcName)), (unsigned)src,
+                  endpoint_name(dest, destName, sizeof(destName)), (unsigned)dest);
+    }
+
+    // The entity's destination is only the first CANDIDATE — see the probe state above. Sending the
+    // session open starts the clock; session_probe_tick() moves on to the next destination if no
+    // session status answers it.
+    gDestProbeActive                                  = true;
+    gDestProbeNext                                    = 0;
+    gDestProbeLastMs                                  = get_time_ms();
+    memset(gProbeSeqDest, 0, sizeof(gProbeSeqDest));
+    gProbeSeqDest[peptalk_send_session_open() & 0x7F] = dest;
 
     if (gWakeCb != NULL) {
         gWakeCb();
     }
+}
+
+// Runs on the MIDI thread, once per tick. Does nothing at all in the normal case — the entity's
+// destination is right, the session status lands within a few milliseconds, and the first call here
+// simply records which destination won and stops.
+static void session_probe_tick(void) {
+    char            destName[128] = {0};
+    ItemCount       destCount     = 0;
+    MIDIEndpointRef candidate     = 0;
+
+    if (!gDestProbeActive || atomic_load(&gSessionOpen)) {
+        return;
+    }
+
+    if ((get_time_ms() - gDestProbeLastMs) < SESSION_PROBE_INTERVAL_MS) {
+        return;
+    }
+    destCount                                         = MIDIGetNumberOfDestinations();
+
+    // Every destination tried and none answered. Give up rather than circle forever putting traffic
+    // on every port on the rig: a device that appears later triggers a fresh scan, and that starts
+    // the probe over from a correct identity reply.
+    if (gDestProbeNext >= destCount) {
+        gDestProbeActive = false;
+        LOG_ERROR("No MIDI destination answered a session open — the device replied to the identity "
+                  "request but is not listening on any output this app can reach\n");
+        return;
+    }
+    candidate                                         = MIDIGetDestination(gDestProbeNext);
+    gDestProbeNext++;
+    gDestProbeLastMs                                  = get_time_ms();
+
+    LOG_DEBUG("No session status yet — trying session open on dest '%s' (0x%08X)\n",
+              endpoint_name(candidate, destName, sizeof(destName)), (unsigned)candidate);
+
+    // gMidiDest walks the candidates because midi_send() is where the destination lives, and there
+    // is nothing else on the wire to disturb: until a session is open this app sends session opens
+    // and nothing else. Which one was RIGHT is settled by the reply, not by where the walk stopped
+    // — handle_session_status() sets it from the sequence id — so the walk may run ahead of the
+    // replies without ever crediting the wrong port.
+    gMidiDest                                         = candidate;
+    gProbeSeqDest[peptalk_send_session_open() & 0x7F] = candidate;
+}
+
+// Runs on the MIDI thread, from the drain: the device answered one of our session opens, and the id
+// it echoed says which one. Resolving that back to a destination is the whole point of the probe.
+static void handle_session_status(uint8_t seq) {
+    char            destName[128] = {0};
+    MIDIEndpointRef answered      = gProbeSeqDest[seq & 0x7F];
+
+    // A status we cannot tie to a probe — a duplicate, or an unsolicited one from a device that
+    // decided to announce itself. It still says a session is open, so take it, but leave the
+    // destination alone rather than guessing.
+    if (answered == 0) {
+        LOG_DEBUG("Session status seq=%02X matches no probe — keeping dest '%s'\n",
+                  (unsigned)seq, endpoint_name(gMidiDest, destName, sizeof(destName)));
+    } else {
+        gMidiDest = answered;
+        LOG_DEBUG("Session open, proved on dest '%s' (0x%08X) by seq=%02X\n",
+                  endpoint_name(answered, destName, sizeof(destName)), (unsigned)answered,
+                  (unsigned)seq);
+    }
+    gDestProbeActive = false;
+    atomic_store(&gSessionOpen, true);
+
+    // The screen and the LEDs are unknown until we have read them once. Set directly rather than
+    // posted: these want-bits belong to this thread, and this IS this thread.
+    gLcdWantFull     = true;
+    gLcdWantLeds     = true;
+    synthlib_request_redraw();
 }
 
 // Runs on the CoreMIDI read callback thread.
@@ -538,9 +683,17 @@ static int midi_scan_devices(void) {
     ItemCount            srcCount  = MIDIGetNumberOfSources();
     ItemCount            destCount = MIDIGetNumberOfDestinations();
 
-    gMidiSource = 0;
-    gMidiDest   = 0;
+    gMidiSource      = 0;
+    gMidiDest        = 0;
     memset(&gDevice, 0, sizeof(gDevice));
+
+    // A SESSION BELONGS TO A CONNECTION, and this scan has just thrown the connection away. Nothing
+    // cleared this before, so after a rescan — a hub replug fires one on its own, see midi_notify_cb
+    // — the app went on believing a session was open on a destination it no longer had, the panel
+    // went on claiming "open", and the destination probe below would have taken that stale flag as
+    // proof that its first guess was right.
+    atomic_store(&gSessionOpen, false);
+    gDestProbeActive = false;
     sysex_reset_all();
     atomic_store(&gSysExAcceptSrc, 0);      // a scan must hear every source, or no identity reply can land   // endpoint refs do not survive a setup change; see sysex_slot_for()
 
@@ -812,6 +965,14 @@ void midi_post_session_open(void) {
     post_to_midi_thread(&msg);
 }
 
+void midi_post_session_status(uint8_t seq) {
+    tMessageContent msg = {0};
+
+    msg.cmd                   = eMsgCmdSessionStatus;
+    msg.sessionStatusData.seq = seq;
+    post_to_midi_thread(&msg);
+}
+
 // ── Command drain (MIDI thread) ──────────────────────────────────────────────
 // Poll-drained, NOT blocked on (eRcvPoll, not eRcvWait as G2-Edit's USB thread uses): this thread
 // has to keep driving its CFRunLoop so midi_notify_cb fires, and it has its own time-based polling
@@ -836,7 +997,7 @@ static void drain_midi_commands(void) {
     while (msg_receive(&gToMidiThread, eRcvPoll, &msg) == EXIT_SUCCESS) {
         switch (msg.cmd) {
             case eMsgCmdScanDevices:
-                scanRequested  = true;
+                scanRequested = true;
                 break;
 
             case eMsgCmdIdentityReply:
@@ -845,6 +1006,10 @@ static void drain_midi_commands(void) {
 
             case eMsgCmdSessionOpen:
                 peptalk_send_session_open();
+                break;
+
+            case eMsgCmdSessionStatus:
+                handle_session_status(msg.sessionStatusData.seq);
                 break;
 
             case eMsgCmdButtonEvent:
@@ -1389,6 +1554,10 @@ static void * midi_thread(void * arg) {
         }
         sds_tick();
         sds_rx_tick();
+
+        // BEFORE the polling decisions below, all of which are gated on gSessionOpen: until a
+        // destination has been proved there is no session, and nothing else in this loop can run.
+        session_probe_tick();
 
         // Poll: if session open, request LCD/LED updates as needed.
         //

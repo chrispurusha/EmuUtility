@@ -51,8 +51,16 @@
 #define PEPTALK_LED_STATE_RESP      (0x61)
 #define PEPTALK_SESSION_STATUS      (0x7F)
 
+// HOW LONG A CANDIDATE DESTINATION GETS BEFORE THE NEXT ONE IS TRIED — see the destination probe in
+// midiComms.c. This is a pacing figure, not a deadline: the reply carries the sequence id of the
+// request that earned it, so a late answer is still credited to the right destination and the probes
+// may overlap freely. It only has to be long enough to keep a rig full of other synths from being
+// sprayed with SysEx faster than it can be sent — an E5000 answers in well under 100ms, and 22
+// destinations at this rate is the worst case a real interface presents.
+#define SESSION_PROBE_INTERVAL_MS    (100.0)
+
 // E-mu EOS device family (E4, E5000, etc.)
-#define EMU_EOS_FAMILY              (1025)
+#define EMU_EOS_FAMILY               (1025)
 
 // ── LCD refresh ──────────────────────────────────────────────────────────────
 // How long the display has to stay quiet before one full frame is fetched to re-base the delta

@@ -76,9 +76,11 @@ uint8_t peptalk_last_request_seq(void) {
     return gLastRequestSeq;
 }
 
-void peptalk_send_session_open(void) {
-    LOG_DEBUG("PEPTALK session open\n");
-    send_peptalk(PEPTALK_SESSION_OPEN, NULL, 0);
+uint8_t peptalk_send_session_open(void) {
+    uint8_t seq = send_peptalk(PEPTALK_SESSION_OPEN, NULL, 0);
+
+    LOG_DEBUG("PEPTALK session open seq=%02X\n", (unsigned)seq);
+    return seq;
 }
 
 void peptalk_send_session_close(void) {
@@ -275,11 +277,16 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
     switch (msgType) {
         case PEPTALK_SESSION_STATUS:
         {
-            LOG_DEBUG("PEPTALK session status\n");
-            gSessionOpen = true;
-            midi_post_lcd_refresh(true);
-            midi_post_led_refresh();
-            synthlib_request_redraw();
+            // THE SEQUENCE ID IS IN BYTE 3 HERE, not byte 4 where every other reply carries it —
+            // measured on an E5000, twice, against session opens sent with deliberately different
+            // ids. It is what says which of the session opens we sent this one is answering, and so
+            // which destination the sampler is actually listening on.
+            //
+            // Nothing is decided here any more. Opening the session settles the connection, and the
+            // connection belongs to the MIDI thread — see msgQueue.h. This thread only reports what
+            // arrived.
+            LOG_DEBUG("PEPTALK session status seq=%02X\n", (unsigned)data[3]);
+            midi_post_session_status(data[3]);
             break;
         }
 

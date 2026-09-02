@@ -57,6 +57,10 @@ void midi_post_button_event(tButtonKey key, bool pressed);
 void midi_post_rotary_event(int delta);
 void midi_post_session_open(void);
 
+// The device answered a session open, echoing the sequence id it was sent with. Posted by the
+// CoreMIDI read callback; the MIDI thread resolves it to a destination — see the destination probe.
+void midi_post_session_status(uint8_t seq);
+
 // A MIDI Note On/Off for the computer-keyboard note entry (noteEntry.c). Ordinary channel-voice
 // MIDI rather than PEPTALK — see NOTE_ENTRY_MIDI_CHANNEL in defs.h.
 void midi_post_note_event(uint8_t note, uint8_t velocity, bool on);
