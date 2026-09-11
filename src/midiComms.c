@@ -277,6 +277,12 @@ static tSysExReassembly        gSysEx[SYSEX_MAX_SOURCES];
 // this is read on the CoreMIDI callback thread. Its own atomic, written by the owning thread.
 static _Atomic MIDIEndpointRef gSysExAcceptSrc = 0;
 
+// WHAT THE MIDI PORTS DIALOGUE SHOWS, published by the MIDI thread for the UI to read. Copies rather
+// than gMidiSource/gMidiDest themselves, which belong to the MIDI thread and change mid-scan and
+// mid-probe - see midi_port_status().
+static _Atomic MIDIEndpointRef gShownSource    = 0;
+static _Atomic MIDIEndpointRef gShownDest      = 0;
+
 // The slot for this source, claiming a free one on first sight. A slot is only ever reclaimed from a
 // source that is NOT mid-message, so growing past SYSEX_MAX_SOURCES can never truncate a transfer
 // that is already under way — it drops the newcomer's message instead, which is the safe direction.
@@ -373,6 +379,7 @@ static bool midi_send_to(const uint8_t * data, uint32_t length, MIDIEndpointRef 
 // opens may overlap on the wire without any risk of crediting the wrong destination, where a purely
 // time-based probe has to leave a gap longer than the worst round trip and still cannot be sure.
 static bool            gDestProbeActive   = false;
+static bool            gDestProbeFixed    = false;     // the output was CHOSEN: try it and nothing else
 static ItemCount       gDestProbeNext     = 0;         // next index into MIDIGetDestination()
 static double          gDestProbeLastMs   = 0.0;
 
@@ -391,12 +398,26 @@ static MIDIEndpointRef gProbeSeqDest[128] = {0};
 
 // Runs on the MIDI thread, from the gToMidiThread drain.
 static void handle_identity_reply(const tIdentityReplyData * reply) {
-    MIDIEndpointRef src    = (MIDIEndpointRef)reply->source;
-    MIDIEntityRef   entity = 0;
-    MIDIEndpointRef dest   = 0;
+    MIDIEndpointRef src                                  = (MIDIEndpointRef)reply->source;
+    MIDIEntityRef   entity                               = 0;
+    MIDIEndpointRef dest                                 = 0;
+    char            wantIn[SYNTHLIB_MIDI_PORT_NAME_MAX]  = {0};
+    char            wantOut[SYNTHLIB_MIDI_PORT_NAME_MAX] = {0};
 
-    // Find the destination endpoint in the same entity as the replying source
-    if (MIDIEndpointGetEntity(src, &entity) == noErr && entity != 0) {
+    // THE MIDI PORTS DIALOGUE'S CHOICE, where there is one (synthlibMidi.h). A chosen input means a
+    // reply from anywhere else is some other device answering the broadcast; a chosen output replaces
+    // the entity guess below, which is the guess the destination probe exists to correct.
+    synthlib_midi_ports_chosen(wantIn, sizeof(wantIn), wantOut, sizeof(wantOut));
+
+    if ((wantIn[0] != '\0') && (src != synthlib_midi_find_port(true, wantIn))) {
+        LOG_DEBUG("Identity reply from a source other than the chosen input '%s' - ignored\n", wantIn);
+        return;
+    }
+
+    if (wantOut[0] != '\0') {
+        dest = synthlib_midi_find_port(false, wantOut);
+    } else if (MIDIEndpointGetEntity(src, &entity) == noErr && entity != 0) {
+        // Find the destination endpoint in the same entity as the replying source
         ItemCount dests = MIDIEntityGetNumberOfDestinations(entity);
 
         if (dests > 0) {
@@ -415,6 +436,8 @@ static void handle_identity_reply(const tIdentityReplyData * reply) {
     gMidiSource       = src;
     gMidiDest         = dest;
     atomic_store(&gSysExAcceptSrc, src);   // from here on, ignore every other device's traffic
+    atomic_store(&gShownSource, src);
+    atomic_store(&gShownDest, dest);
 
     {
         char srcName[128]  = {0};
@@ -435,6 +458,7 @@ static void handle_identity_reply(const tIdentityReplyData * reply) {
     // session open starts the clock; session_probe_tick() moves on to the next destination if no
     // session status answers it.
     gDestProbeActive                                  = true;
+    gDestProbeFixed                                   = (wantOut[0] != '\0');
     gDestProbeNext                                    = 0;
     gDestProbeLastMs                                  = get_time_ms();
     memset(gProbeSeqDest, 0, sizeof(gProbeSeqDest));
@@ -458,6 +482,15 @@ static void session_probe_tick(void) {
     }
 
     if ((get_time_ms() - gDestProbeLastMs) < SESSION_PROBE_INTERVAL_MS) {
+        return;
+    }
+
+    // A CHOSEN output is not walked away from. The user named it, so trying the rest of the rig
+    // would be overriding them - and putting session opens on ports they did not ask for.
+    if (gDestProbeFixed) {
+        gDestProbeActive = false;
+        LOG_ERROR("The chosen MIDI output did not answer a session open - the device replied to the "
+                  "identity request but is not listening there\n");
         return;
     }
     destCount                                         = MIDIGetNumberOfDestinations();
@@ -506,6 +539,7 @@ static void handle_session_status(uint8_t seq) {
                   (unsigned)seq);
     }
     gDestProbeActive = false;
+    atomic_store(&gShownDest, gMidiDest);
     atomic_store(&gSessionOpen, true);
 
     // The screen and the LEDs are unknown until we have read them once. Set directly rather than
@@ -713,10 +747,34 @@ static int midi_scan_devices(void) {
         MIDIPortConnectSource(gMidiInPort, src, (void *)(uintptr_t)src);
     }
 
+    atomic_store(&gShownSource, 0);
+    atomic_store(&gShownDest, 0);
+
+    // A CHOSEN OUTPUT is the only one asked, and one that is not plugged in is waited for rather than
+    // replaced by whatever else is on the rig: the setup-changed notification rescans when it
+    // appears. Sources are still all connected above - a reply is filtered by the chosen input in
+    // handle_identity_reply(), where the source it came from is known.
+    char            wantOut[SYNTHLIB_MIDI_PORT_NAME_MAX] = {0};
+    MIDIEndpointRef onlyDest                             = 0;
+
+    synthlib_midi_ports_chosen(NULL, 0, wantOut, sizeof(wantOut));
+
+    if (wantOut[0] != '\0') {
+        onlyDest = synthlib_midi_find_port(false, wantOut);
+
+        if (onlyDest == 0) {
+            LOG_DEBUG("MIDI output '%s' was chosen and is not present - waiting for it\n", wantOut);
+            return EXIT_FAILURE;
+        }
+    }
+
     for (ItemCount i = 0; i < destCount; i++) {
         MIDIEndpointRef dest = MIDIGetDestination(i);
         CFStringRef     name = NULL;
 
+        if ((onlyDest != 0) && (dest != onlyDest)) {
+            continue;
+        }
         MIDIObjectGetStringProperty(dest, kMIDIPropertyName, &name);
 
         if (name != NULL) {
@@ -804,6 +862,32 @@ void midi_request_reconnect(void) {
 
     msg.cmd = eMsgCmdScanDevices;
     post_to_midi_thread(&msg);
+}
+
+// UI thread. One line for the MIDI Ports dialogue, from the published copies above and the choice.
+void midi_port_status(char * text, size_t size) {
+    char            wantIn[SYNTHLIB_MIDI_PORT_NAME_MAX]  = {0};
+    char            wantOut[SYNTHLIB_MIDI_PORT_NAME_MAX] = {0};
+    char            srcName[SYNTHLIB_MIDI_PORT_NAME_MAX] = {0};
+    char            dstName[SYNTHLIB_MIDI_PORT_NAME_MAX] = {0};
+    MIDIEndpointRef src                                  = atomic_load(&gShownSource);
+    MIDIEndpointRef dest                                 = atomic_load(&gShownDest);
+
+    synthlib_midi_ports_chosen(wantIn, sizeof(wantIn), wantOut, sizeof(wantOut));
+    synthlib_midi_port_name(src, srcName, sizeof(srcName));
+    synthlib_midi_port_name(dest, dstName, sizeof(dstName));
+
+    if (atomic_load(&gSessionOpen) && (src != 0)) {
+        snprintf(text, size, "Connected: heard on %s, played through %s", srcName, dstName);
+    } else if (src != 0) {
+        snprintf(text, size, "The sampler answered on %s; opening a session through %s", srcName, dstName);
+    } else if ((wantOut[0] != '\0') && (synthlib_midi_find_port(false, wantOut) == 0)) {
+        snprintf(text, size, "Waiting for %s to be plugged in", wantOut);
+    } else if ((wantIn[0] != '\0') && (synthlib_midi_find_port(true, wantIn) == 0)) {
+        snprintf(text, size, "Waiting for %s to be plugged in", wantIn);
+    } else {
+        snprintf(text, size, "Not connected - press Scan to look again");
+    }
 }
 
 void midi_post_identity_reply(MIDIEndpointRef source, uint8_t deviceId, uint16_t family, uint16_t member) {
@@ -1746,6 +1830,10 @@ int start_midi_thread(void) {
     // builds the menus first, so a command could in principle be posted before the thread's first
     // line runs. An initialised-but-undrained queue just holds it until the first tick.
     msg_init(&gToMidiThread, "toMidiThread", sizeof(tMessageContent));
+
+    // The ports chosen in the MIDI Ports dialogue, loaded here on the UI thread because the prefs
+    // file is the UI thread's; the MIDI thread reads the loaded copy. One device, so no scope.
+    synthlib_midi_ports_set_scope(NULL);
 
     if (pthread_create(&gMidiThread, NULL, midi_thread, NULL) != 0) {
         LOG_ERROR("pthread_create for MIDI thread failed\n");

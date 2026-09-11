@@ -39,22 +39,36 @@ extern "C" {
 #include "appMenuBar.h"
 #include "noteEntry.h"
 #include "synthlibPersistence.h"
+#include "midiPortDialog.h"
 
 // Just two menus, each with a handful of items — small enough that (unlike
 // G2-Edit's much larger File/Settings/Backup/Restore/Controls/Tools/View set)
 // there's no separate menuActions.c; the action bodies live directly in each
 // open_X_menu() below.
 
-static void action_scan_devices(int index) {
-    (void)index;
-    midi_request_reconnect(); // the scan itself runs on the MIDI thread, which owns the connection state
+// The scan itself runs on the MIDI thread, which owns the connection state. The same request serves
+// the dialogue's Scan button and a changed choice: either way the thing to do is look again.
+static void rescan_devices(void) {
+    midi_request_reconnect();
     wake_glfw();
+}
+
+// SCAN MOVED INTO HERE (2026-09-11). The Device menu's only item was "Scan Devices"; the dialogue
+// has it as a button, beside the input and output lists it now scans within.
+static void action_midi_ports(int index) {
+    (void)index;
+    midi_port_dialog_open(&(tMidiPortDialogHost){
+        .title   = "MIDI Ports",
+        .changed = rescan_devices,
+        .scan    = rescan_devices,
+        .status  = midi_port_status,
+    });
 }
 
 static void open_device_menu(tCoord anchor) {
     static tMenuItem items[] = {
-        {"Scan Devices", (tRgb)RGB_GREY_3, action_scan_devices, 0, NULL, 0, 0.0},
-        {NULL,           (tRgb)RGB_BLACK,  NULL,                0, NULL, 0, 0.0},
+        {"MIDI Ports...", (tRgb)RGB_GREY_3, action_midi_ports, 0, NULL, 0, 0.0},
+        {NULL,            (tRgb)RGB_BLACK,  NULL,              0, NULL, 0, 0.0},
     };
 
     open_context_menu(anchor, items, 0, 0.0);
@@ -121,7 +135,6 @@ static void open_controls_menu(tCoord anchor) {
 //
 // If something genuinely experimental turns up again, G2-Edit still has the pattern to copy.
 
-
 // ── Help menu ─────────────────────────────────────────────────────────────────
 // WHICH BUILD IS THIS. Version, compile time and the render backend in force. The backend is a
 // preference now, so "it looks wrong" and "it looks wrong on Metal" are different reports.
@@ -143,10 +156,10 @@ static void open_help_menu(tCoord anchor) {
 }
 
 tMenuBarItem gAppMenuBar[] = {
-    {"Device",       open_device_menu      },
-    {"Controls",     open_controls_menu    },
-    {"Help",         open_help_menu        },
-    {NULL,           NULL                  },
+    {"Device",   open_device_menu  },
+    {"Controls", open_controls_menu},
+    {"Help",     open_help_menu    },
+    {NULL,       NULL              },
 };
 
 tRectangle app_menu_bar_rect(void) {

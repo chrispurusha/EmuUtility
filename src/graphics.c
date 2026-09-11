@@ -49,6 +49,7 @@ extern "C" {
 #include "utilsGraphics.h"
 #include "synthlibWindow.h"
 #include "synthlibPopups.h"
+#include "midiPortDialog.h"
 #include "emuGraphics.h"
 #include "mouseHandle.h"
 #include "menus.h"
@@ -179,6 +180,10 @@ void init_graphics(void) {
     // field this app can put on screen lives (the file browser's filename box).
     // The coordinator needs the menu bar before the first frame — see synthlibPopups.h.
     synthlib_popups_set_menu_bar(gAppMenuBar, app_menu_bar_rect);
+
+    // SynthLib's MIDI Ports dialogue, which the coordinator does not carry itself because it needs
+    // CoreMIDI - see midiPortDialog.h. Opened from Device > MIDI Ports.
+    synthlib_popups_register(midi_port_dialog_popup(), 1);
 
     synthlib_window_create(&(tSynthLibWindowConfig){
         .title        = title,

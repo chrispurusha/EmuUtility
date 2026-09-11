@@ -48,6 +48,9 @@ void midi_send(const uint8_t * data, uint32_t length);
 // thread's own use of gMidiSource/gMidiDest/gDevice and CoreMIDI's port connections.
 void midi_request_reconnect(void);
 
+// UI thread. One line saying what is connected, for the MIDI Ports dialogue's status row.
+void midi_port_status(char * text, size_t size);
+
 // Hand an identity reply seen on the CoreMIDI read callback thread to the MIDI thread, which does
 // the destination lookup and takes ownership of the resulting connection.
 void midi_post_identity_reply(MIDIEndpointRef source, uint8_t deviceId, uint16_t family, uint16_t member);
