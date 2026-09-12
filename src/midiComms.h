@@ -49,6 +49,9 @@ void midi_request_reconnect(void);
 // UI thread. One line saying what is connected, for the MIDI Ports dialogue's status row.
 void midi_port_status(char * text, size_t size);
 
+// UI thread: the channel notes go out on, 1-16, for the dialogue's Auto cell.
+uint32_t midi_channel_in_use(void);
+
 // Hand an identity reply seen on the CoreMIDI read callback thread to the MIDI thread, which does
 // the destination lookup and takes ownership of the resulting connection.
 void midi_post_identity_reply(MIDIEndpointRef source, uint8_t deviceId, uint16_t family, uint16_t member);

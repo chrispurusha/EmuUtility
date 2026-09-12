@@ -56,10 +56,11 @@ static void rescan_devices(void) {
 static void action_midi_ports(int index) {
     (void)index;
     midi_port_dialog_open(&(tMidiPortDialogHost){
-        .title   = "MIDI Ports",
-        .changed = rescan_devices,
-        .scan    = rescan_devices,
-        .status  = midi_port_status,
+        .title        = "MIDI Ports",
+        .changed      = rescan_devices,
+        .scan         = rescan_devices,
+        .status       = midi_port_status,
+        .channelInUse = midi_channel_in_use,
     });
 }
 

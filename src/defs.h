@@ -109,7 +109,7 @@
 
 
 // notes §17
-#define EMU_MIDI_CHANNEL              (0)      // channel 1: note entry and any other channel message
+#define EMU_MIDI_CHANNEL              (0)      // channel 1, when the MIDI Ports channel is Auto
 #define NOTE_ENTRY_VELOCITY           (100)
 #define NOTE_ENTRY_FIRST_NOTE         (48)     // C3 — the note the 'a' key plays before any octave shift
 #define NOTE_ENTRY_MAX_NOTE           (127)

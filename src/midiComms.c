@@ -205,7 +205,7 @@ static _Atomic MIDIEndpointRef gSysExAcceptSrc = 0;
 // mid-probe - see midi_port_status().
 static _Atomic MIDIEndpointRef gShownSource    = 0;
 static _Atomic MIDIEndpointRef gShownDest      = 0;
-static _Atomic MIDIEndpointRef gIgnoredSource  = 0;    // the device answered here, not on the chosen input
+static _Atomic MIDIEndpointRef gHeardElsewhere = 0;    // the device answered here, not on the chosen input
 
 // The slot for this source, claiming a free one on first sight. A slot is only ever reclaimed from a
 // source that is NOT mid-message, so growing past SYSEX_MAX_SOURCES can never truncate a transfer
@@ -270,6 +270,17 @@ static const char * endpoint_name(MIDIEndpointRef ep, char * buf, size_t bufLen)
 
 // ── Internal send to a specific destination ───────────────────────────────────
 
+// 0-based, as on the wire. The dialogue's channel, or EMU_MIDI_CHANNEL when it is Automatic.
+static uint8_t emu_midi_channel(void) {
+    uint32_t chosen = synthlib_midi_channel_chosen();
+
+    return (chosen == SYNTHLIB_MIDI_CHANNEL_AUTOMATIC) ? EMU_MIDI_CHANNEL : (uint8_t)(chosen - 1u);
+}
+
+uint32_t midi_channel_in_use(void) {
+    return (uint32_t)emu_midi_channel() + 1u;
+}
+
 static bool midi_send_to(const uint8_t * data, uint32_t length, MIDIEndpointRef dest) {
     // notes §10
     return synthlib_midi_send_to(data, length, dest);
@@ -301,11 +312,16 @@ static void handle_identity_reply(const tIdentityReplyData * reply) {
     // the entity guess below, which is the guess the destination probe exists to correct.
     synthlib_midi_ports_chosen(wantIn, sizeof(wantIn), wantOut, sizeof(wantOut));
 
-    if ((wantIn[0] != '\0') && (src != synthlib_midi_find_port(true, wantIn))) {
-        LOG_DEBUG("Identity reply from a source other than the chosen input '%s' - ignored\n", wantIn);
-        atomic_store(&gIgnoredSource, src);
-        synthlib_request_redraw();
+    bool elsewhere = (wantIn[0] != '\0') && (src != synthlib_midi_find_port(true, wantIn));
+
+    // An interface may deliver a port's input under another name (the Cirklon's "Port 2" for MIDI 2),
+    // so an E-mu answering elsewhere is taken - unless one on the chosen input already has been.
+    if (elsewhere && gDevice.connected) {
         return;
+    }
+
+    if (elsewhere) {
+        LOG_DEBUG("Identity reply from a source other than the chosen input '%s' - using it\n", wantIn);
     }
 
     if (wantOut[0] != '\0') {
@@ -329,7 +345,7 @@ static void handle_identity_reply(const tIdentityReplyData * reply) {
     gDevice.connected = true;
     gMidiSource       = src;
     gMidiDest         = dest;
-    atomic_store(&gIgnoredSource, 0);
+    atomic_store(&gHeardElsewhere, elsewhere ? src : 0);
     atomic_store(&gSysExAcceptSrc, src);   // from here on, ignore every other device's traffic
     atomic_store(&gShownSource, src);
     atomic_store(&gShownDest, dest);
@@ -623,7 +639,7 @@ static int midi_scan_devices(void) {
 
     atomic_store(&gShownSource, 0);
     atomic_store(&gShownDest, 0);
-    atomic_store(&gIgnoredSource, 0);
+    atomic_store(&gHeardElsewhere, 0);
 
     // notes §18
     char            wantOut[SYNTHLIB_MIDI_PORT_NAME_MAX] = {0};
@@ -720,13 +736,15 @@ void midi_port_status(char * text, size_t size) {
     char            dstName[SYNTHLIB_MIDI_PORT_NAME_MAX] = {0};
     MIDIEndpointRef src                                  = atomic_load(&gShownSource);
     MIDIEndpointRef dest                                 = atomic_load(&gShownDest);
-    MIDIEndpointRef ignored                              = atomic_load(&gIgnoredSource);
+    MIDIEndpointRef elsewhere                            = atomic_load(&gHeardElsewhere);
 
     synthlib_midi_ports_chosen(wantIn, sizeof(wantIn), wantOut, sizeof(wantOut));
     synthlib_midi_port_name(src, srcName, sizeof(srcName));
     synthlib_midi_port_name(dest, dstName, sizeof(dstName));
 
-    if (atomic_load(&gSessionOpen) && (src != 0)) {
+    if (atomic_load(&gSessionOpen) && (src != 0) && (elsewhere != 0)) {
+        snprintf(text, size, "Connected: heard on %s (not the chosen %s), played through %s", srcName, wantIn, dstName);
+    } else if (atomic_load(&gSessionOpen) && (src != 0)) {
         snprintf(text, size, "Connected: heard on %s, played through %s", srcName, dstName);
     } else if (src != 0) {
         snprintf(text, size, "The sampler answered on %s; opening a session through %s", srcName, dstName);
@@ -734,11 +752,6 @@ void midi_port_status(char * text, size_t size) {
         snprintf(text, size, "Waiting for %s to be plugged in", wantOut);
     } else if ((wantIn[0] != '\0') && (synthlib_midi_find_port(true, wantIn) == 0)) {
         snprintf(text, size, "Waiting for %s to be plugged in", wantIn);
-    } else if (ignored != 0) {
-        char ignoredName[SYNTHLIB_MIDI_PORT_NAME_MAX] = {0};
-
-        synthlib_midi_port_name(ignored, ignoredName, sizeof(ignoredName));
-        snprintf(text, size, "The sampler answered on %s, not the chosen input %s", ignoredName, wantIn);
     } else {
         snprintf(text, size, "Not connected - press Scan to look again");
     }
@@ -1069,13 +1082,13 @@ static void drain_midi_commands(void) {
             {
                 // notes §25
                 uint8_t note[3] = {
-                    (uint8_t)((msg.noteEventData.on ? MIDI_NOTE_ON : MIDI_NOTE_OFF) | EMU_MIDI_CHANNEL),
+                    (uint8_t)((msg.noteEventData.on ? MIDI_NOTE_ON : MIDI_NOTE_OFF) | emu_midi_channel()),
                     (uint8_t)(msg.noteEventData.note & 0x7F),
                     (uint8_t)(msg.noteEventData.on ? (msg.noteEventData.velocity & 0x7F) : 0)
                 };
 
                 LOG_DEBUG("MIDI note %s ch=%u note=%u vel=%u (%02X %02X %02X)\n",
-                          msg.noteEventData.on ? "on" : "off", (unsigned)(EMU_MIDI_CHANNEL + 1),
+                          msg.noteEventData.on ? "on" : "off", (unsigned)(emu_midi_channel() + 1u),
                           (unsigned)msg.noteEventData.note, (unsigned)note[2], note[0], note[1], note[2]);
                 midi_send(note, sizeof(note));
                 break;
