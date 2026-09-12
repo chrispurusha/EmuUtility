@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/msgQueue.h.md - "// notes §k" refers there.
 
 #ifndef __MSG_QUEUE_H__
 #define __MSG_QUEUE_H__
@@ -25,20 +26,7 @@
 #include "sampleDump.h"
 #include "synthlibQueue.h" // generic queue mechanism: tMessageQueue / eRcv / msg_init / msg_send / ...
 
-// gToMidiThread is the MIDI thread's command queue. Every other thread (the UI/render thread, the
-// CoreMIDI read callback thread, the NSWorkspace sleep/wake block) posts here instead of touching
-// the connection state or sending to the device itself, so gDevice / gMidiSource / gMidiDest and the
-// CoreMIDI port objects have exactly ONE owner. That ownership rule is the whole point: before this,
-// midi_scan_devices() ran on the UI thread from the Scan Devices menu item and from the wake
-// notification, concurrently rewriting the very state the MIDI thread's own loop was using.
-// SynthEdit hit and fixed the same class of bug (see midi_request_reconnect() there); this is the
-// same fix expressed with the shared SynthLib queue instead of a bespoke flag.
-//
-// There is deliberately NO reverse (MIDI -> UI) queue here yet. Everything this app reports upward
-// today is a *coalescing* dirty-bit (gNeedLcdFull/gNeedLcdDelta, gLcd.refresh, gLeds), and those must
-// stay flags — N rapid device updates have to collapse into one redraw, where a queue would enqueue
-// N. See reverse-queue-design.md ("What belongs on the queue — and what doesn't"). Add gToGuiThread
-// when there is a first genuine discrete result to carry.
+// notes §1
 typedef enum {
     eMsgCmdScanDevices,    // rescan CoreMIDI and re-identify (menu action, sleep/wake, setup change)
     eMsgCmdIdentityReply,  // identityReplyData: an identity reply seen by the CoreMIDI read callback
@@ -67,10 +55,7 @@ typedef struct {
     uint16_t member;
 } tIdentityReplyData;
 
-// Posted by the CoreMIDI read callback when the device answers a session open. Carries the sequence
-// id the reply echoed, which is what identifies WHICH session open it is answering — and therefore
-// which destination the device is listening on. Only the MIDI thread may act on that, because it
-// owns gMidiDest and the destination probe.
+// notes §2
 typedef struct {
     uint8_t seq;
 } tSessionStatusData;
@@ -99,12 +84,7 @@ typedef struct {
     bool leds;     // the LED state is wanted too
 } tLcdRefreshData;
 
-// Posted by the CoreMIDI read callback once it has done the part it owns — validating the reply and
-// writing the pixels. Everything the reply implies for the REQUEST state (what is still in flight,
-// whether another transfer is owed) is decided by the MIDI thread from this message, because that
-// thread owns it. Mirrors how tIdentityReplyData splits the same way.
-// Ownership of dump.samples MOVES to the MIDI thread with this message: it is the thread that will
-// spend the next several minutes reading it, and the only one that knows when it is finished.
+// notes §3
 typedef struct {
     tSampleDump dump;
     uint16_t    sampleNumber;

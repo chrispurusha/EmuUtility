@@ -16,15 +16,13 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/emuGraphics.c.md - "// notes §k" refers there.
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// NO GRAPHICS HEADER. The LCD texture was the last thing in this file that named OpenGL —
-// it is created and uploaded through utilsGraphics.h's render_backend_texture_* calls now.
-// Losing the include is the part a compiler enforces: this file can no longer reacquire a
-// dependency on a particular graphics API by accident.
+// notes §1
 #include <math.h>
 
 #include "defs.h"
@@ -64,38 +62,17 @@ static uint32_t gDialValue   = 0;
 #define LP_COL_X(c)    (LP_ORIGIN_X + LP_GAP + (c) * (LP_W + LP_GAP))
 #define LP_FKEY_COL    4           // F1 is the fifth button along the top row; F2..F6 follow it
 
-// ── LCD soft keys ─────────────────────────────────────────────────────────────
-// The six boxes the sampler draws along the bottom of its own display are its soft keys, and F1..F6
-// are the buttons that press them. These are their positions WITHIN the 240x64 bitmap, in device
-// pixels, read straight off a live E5000 (2026-08-19) with the LCDDUMP backdoor command in
-// graphics.c, which prints the raw bitmap as an ASCII grid for exactly this purpose.
-//
-// The device divides the full 240-pixel width into six exact 40-pixel cells at x = 0, 40, 80, 120,
-// 160, 200, draws a 39-pixel rounded box in each (one pixel of gutter between neighbours), and the
-// row occupies y = 51..63 — flush with the bottom edge of the display. The click target is the
-// whole 40-pixel cell rather than the 39-pixel box, so the gutters aren't dead pixels between two
-// live keys.
-//
-// EMU_SOFTKEY_COUNT itself lives in emuGraphics.h — graphics.c's backdoor walks the boxes too.
+// notes §2
 #define LCD_SOFTKEY_X        0.0    // left edge of the first cell
 #define LCD_SOFTKEY_PITCH    40.0   // cell-to-cell stride
 #define LCD_SOFTKEY_W        40.0   // full cell width (the drawn box inside it is 39)
 #define LCD_SOFTKEY_Y        51.0   // top edge of the box row
 
-// How far down the display the click-to-Exit zone reaches, in device pixels.
-//
-// Deliberately NOT "everything above the soft keys". The sampler stacks things there: Utils raises a
-// second row of boxes, and a popup such as Sample Info puts an OK button well above the normal band.
-// Treating that whole area as Exit would fire Exit at a button the user was aiming for. The top half
-// is title and value text on every screen seen so far, and rows 32-50 are left as a dead margin
-// rather than assumed safe.
+// notes §3
 #define LCD_EXIT_ZONE_H    32.0
 #define LCD_SOFTKEY_H      13.0     // through to the last row of the display
 
-// The LCD is placed and sized FROM the F-key geometry rather than independently, so each soft-key
-// box lands directly above the button that presses it and stays there if either the button grid or
-// the measured box geometry is ever adjusted. Scaling the bitmap so one box spans exactly one
-// button pitch fixes the width; centring box 0 on F1 then fixes the left edge.
+// notes §4
 #define LCD_SCALE_X    ((LP_W + LP_GAP) / LCD_SOFTKEY_PITCH)
 #define LCD_W          (LCD_WIDTH * LCD_SCALE_X)
 #define LCD_H          120.0
@@ -106,14 +83,7 @@ static uint32_t gDialValue   = 0;
 // ── LCD texture ───────────────────────────────────────────────────────────────
 
 void init_lcd_texture(void) {
-    // NULL: the texels are left undefined and filled by the first update_lcd_texture(). They can
-    // never be sampled undefined — render_lcd() updates before it draws on any frame where
-    // gLcd.refresh differs from gLastRefresh, and those differ on the very first frame (0 against
-    // the 0xFFFFFFFF gLastRefresh starts at). The texture is additionally not drawn at all until
-    // a session is open.
-    // Nearest filtering and edge clamping are what the backend gives every texture — which is
-    // what this wanted anyway, since an LCD pixel is meant to look like a pixel.
-    // Nearest: an LCD pixel is meant to look like a pixel, and this blits one texel per pixel.
+    // notes §5
     gLcdTexture = render_backend_texture_create(LCD_WIDTH, LCD_HEIGHT, NULL, eTextureNearest);
 }
 
@@ -123,11 +93,7 @@ static void update_lcd_texture(void) {
     const tRgb     fg = (tRgb)RGB_LCD_FG;
     const tRgb     bg = (tRgb)RGB_LCD_BG;
 
-    // Snapshot the shared LCD buffer under gLcdMutex before expanding it. The
-    // CoreMIDI callback thread mutates gLcd.pixels in place (full memcpy or an
-    // in-place XOR delta), so reading it directly across the whole expansion
-    // loop could tear a frame. Copy out fast, then expand + upload the local
-    // copy with the lock released (no reason to hold it over the GL call).
+    // notes §6
     uint8_t        pixels[LCD_BYTES];
     uint32_t       snapshotRefresh;
 
@@ -206,10 +172,7 @@ tButtonKey emu_softkey_button(int index) {
     return ((index < 0) || (index >= EMU_SOFTKEY_COUNT)) ? (tButtonKey)0 : gSoftKeyOrder[index];
 }
 
-// Clicking a box on the display is exactly the same event as clicking the F-key beneath it, so it
-// goes through the same handler — including that handler's press/release semantics and its
-// "always ask for a full LCD dump afterwards" rule. userData is the index, not a pointer, because
-// the boxes are not objects: they are regions computed from the layout each frame.
+// notes §7
 static void softkey_click_handler(tCoord coord, eClickPhase phase, void * userData) {
     (void)coord;
     emu_button_press(emu_softkey_button((int)(intptr_t)userData), phase == eClickPress);
@@ -236,10 +199,7 @@ void render_lcd() {
     }
     render_texture(mainArea, lcd, gLcdTexture);
 
-    // The soft-key boxes are only live while a session is open — with no display content there is
-    // nothing on them to press.
-    // Registered BEFORE the soft keys so those sit on top of it — the body is the fallback for the
-    // part of the display with nothing under it.
+    // notes §8
     register_click_region(emu_lcd_body_rect(), eClickLayerPanel, lcd_body_click_handler, NULL);
 
     for (int i = 0; i < EMU_SOFTKEY_COUNT; i++) {
@@ -294,10 +254,7 @@ void dial_nudge(int delta) {
 static double gDialAngleAccum = 0.0; // fractional degrees of rotation not yet turned into a step
 
 void dial_nudge_by_angle(double deltaDegrees) {
-    // Rotate at the same angular rate as the mouse (1° of mouse rotation ==
-    // 1° of visual dial rotation), without pinning the indicator to the raw
-    // mouse angle — matches how a real endless encoder is driven, rather than
-    // a bounded pot that snaps to wherever you click.
+    // notes §9
     double degreesPerStep = 360.0 / (double)DIAL_RANGE;
 
     gDialAngleAccum += deltaDegrees;
@@ -398,13 +355,7 @@ static tButton * find_button(tButtonKey key) {
     return NULL;
 }
 
-// Buttons act on both press and release (unlike the dial, which only arms on
-// press) — mirrors the "btn->pressed = pressed" line previously in
-// handle_mouse_button()'s inline hit-test (removed from mouseHandle.c).
-//
-// Split out of the click handler so the soft-key boxes drawn on the LCD, and the backdoor's BUTTON
-// command, raise exactly the same event a click on the button itself does — including lighting the
-// on-screen button, so pressing a box on the display visibly presses the F-key below it.
+// notes §10
 void emu_button_press(tButtonKey key, bool pressed) {
     tButton * btn = find_button(key);
 
@@ -414,32 +365,13 @@ void emu_button_press(tButtonKey key, bool pressed) {
     LOG_DEBUG("hit button key=%d label=%s\n", (int)btn->key, btn->label);
     btn->pressed = pressed;
 
-    // Stamped BEFORE the button event is posted, not after.
-    //
-    // Only the PRESS counts as activity — the release is the tail of the same gesture and changes
-    // nothing further, but stamping it restarts the settle timer AND makes every reply in flight
-    // look superseded.
-    //
-    // The ORDER matters because this is also what restarts the idle probe clock (see
-    // eMsgCmdUiActivity). The MIDI thread can drain the queue and reach its polling decisions
-    // between any two posts, so posting the button event first left a window in which an idle probe
-    // went out on top of a press — and the whole frame the press actually wanted then had to queue
-    // behind that probe's reply. Restarting the clock first closes the window: by the time the
-    // button event reaches the wire, the poll has already been told to stand down.
+    // notes §11
     if (pressed) {
         midi_note_ui_activity();
     }
     midi_post_button_event(btn->key, pressed);
 
-    // A WHOLE FRAME, not a delta and not a probe.
-    //
-    // Polling exists to answer "has the screen moved?". We just pressed a button, so it has —
-    // there is nothing to find out, and the only open question is what it now shows, which only a
-    // whole frame is allowed to answer (see LCD_USE_DELTAS). Asking for a delta here meant that
-    // after LCD_RESYNC_IDLE_MS of quiet — an ordinary isolated press — the request went out as a
-    // probe whose payload is deliberately discarded, with the frame we actually wanted following
-    // behind it: two round trips on a 31250-baud link for one press, the second unable to start
-    // until the first had finished.
+    // notes §12
     midi_post_lcd_refresh(true);
     synthlib_request_redraw();
 }

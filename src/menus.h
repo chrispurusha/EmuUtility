@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/menus.h.md - "// notes §k" refers there.
 
 #ifndef __MENUS_H__
 #define __MENUS_H__
@@ -27,12 +28,7 @@
 extern "C" {
 #endif
 
-// App-specific menu-building helpers (open_X_context_menu()) belong here once
-// EmuUtility actually raises a context menu — see G2-Edit's menus.c for the
-// pattern: build a static tMenuItem[] table ending in a {NULL, ...} sentinel
-// (SynthLib walks items until it finds label == NULL, there's no count), then
-// call open_context_menu(). Nothing does that yet, so there's nothing to
-// declare here beyond what contextMenu.h already provides.
+// notes §1
 
 #ifdef __cplusplus
 }

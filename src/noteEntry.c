@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/noteEntry.c.md - "// notes §k" refers there.
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,15 +35,7 @@ extern "C" {
 #include "midiComms.h"
 #include "noteEntry.h"
 
-// The key map, in semitone order from the leftmost key. The home row is the white notes and the row
-// above holds the blacks — a = C, w = C#, s = D, e = D#, d = E, f = F and so on, with k, o, l and p
-// carrying on into the octave above where the home row runs out. Identical to G2-Edit's
-// note_offset_for_key() (src/virtualKeyboard.c), deliberately: the same fingers should play the
-// same notes in both applications.
-//
-// A table rather than a switch because the release path needs the reverse lookup too — which slot a
-// key occupies — so that a key can be remembered by slot and released with the note it actually
-// started, not the note its position would produce now (see gKeyNote below).
+// notes §1
 static const int gNoteKeys[] = {
     GLFW_KEY_A,   // C
     GLFW_KEY_W,   // C#

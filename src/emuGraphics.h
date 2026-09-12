@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/emuGraphics.h.md - "// notes §k" refers there.
 
 #ifndef __EMU_GRAPHICS_H__
 #define __EMU_GRAPHICS_H__
@@ -36,10 +37,7 @@ void render_dial_knob(void);
 void dial_nudge(int delta);   // +ve = clockwise / increment
 tRectangle emu_dial_rect(void);
 
-// Rotary drag mode: nudge the dial by a change in mouse angle (degrees,
-// signed, shortest-path) around the dial centre — matches
-// calculate_mouse_angle()'s convention. Rotates at the same rate as the
-// mouse without pinning the indicator to the raw mouse angle.
+// notes §1
 void dial_nudge_by_angle(double deltaDegrees);
 
 // Render the button panel below the LCD.
@@ -51,10 +49,7 @@ void init_lcd_texture(void);
 // Total panel height needed for buttons below the LCD.
 double button_panel_height(double areaWidth);
 
-// ── LCD soft keys ─────────────────────────────────────────────────────────────
-// The six boxes the sampler draws along the bottom of its own display are its soft keys. They are
-// clickable, and each raises the same event as the F-key directly beneath it — which is why the LCD
-// is positioned from the F-key geometry rather than independently (see emuGraphics.c).
+// notes §2
 
 #define EMU_SOFTKEY_COUNT    6
 

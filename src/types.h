@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/types.h.md - "// notes §k" refers there.
 
 #ifndef __TYPES_H__
 #define __TYPES_H__
@@ -104,12 +105,7 @@ typedef struct {
 
 typedef struct {
     uint8_t pixels[LCD_BYTES];    // 240×64, 1 bit per pixel, packed MSB-first
-    // Incremented on each update; the render thread compares it against its own last-seen value to
-    // decide whether to re-upload the texture. ATOMIC because that comparison is the ONE read of
-    // this struct made without gLcdMutex - render_lcd() and the backdoor's STATE both read it bare,
-    // deliberately, since taking the mutex just to test a dirty flag would put the render thread
-    // behind the CoreMIDI thread on every frame. The pixels still need the mutex; this counter does
-    // not, but it does need to not be a plain int that two threads touch.
+    // notes §1
     _Atomic uint32_t refresh;
 } tLcdBuffer;
 

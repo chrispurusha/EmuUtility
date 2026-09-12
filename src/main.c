@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/main.c.md - "// notes §k" refers there.
 
 #ifdef __cplusplus
 extern "C" {
@@ -53,12 +54,7 @@ int main(int argc, char ** argv) {
     init_signals();
     register_sleep_wake_notifications();
 
-    // BEFORE init_graphics(), and the order is load-bearing. The window is built differently for
-    // each render backend — OpenGL needs a GL context created alongside it, Metal needs none — so
-    // synthlib_window_create() reads the saved choice before it makes the window. Without this the
-    // read returns the default and the setting is SILENTLY IGNORED: no error, nothing in the log,
-    // both values simply give OpenGL. prefs_init() also runs from setup_main_menu() below, where it
-    // always did; it clears and re-reads, so calling it twice is harmless.
+    // notes §1
     prefs_init("EmuUtility");
 
     init_graphics();

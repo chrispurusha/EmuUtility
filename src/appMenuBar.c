@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/appMenuBar.c.md - "// notes §k" refers there.
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,10 +42,7 @@ extern "C" {
 #include "synthlibPersistence.h"
 #include "midiPortDialog.h"
 
-// Just two menus, each with a handful of items — small enough that (unlike
-// G2-Edit's much larger File/Settings/Backup/Restore/Controls/Tools/View set)
-// there's no separate menuActions.c; the action bodies live directly in each
-// open_X_menu() below.
+// notes §1
 
 // The scan itself runs on the MIDI thread, which owns the connection state. The same request serves
 // the dialogue's Scan button and a changed choice: either way the thing to do is look again.
@@ -109,10 +107,7 @@ static void open_controls_menu(tCoord anchor) {
         {NULL,                   (tRgb)RGB_BLACK,  NULL,                        0, NULL, 0, 0.0},
     };
 
-    // Labels are fixed strings with a checkmark prefix baked in (tMenuItem has no separate
-    // "checked" flag) — point each entry's label at the checked or unchecked variant depending
-    // on the current dial mode, rather than mutating the string in place. Same approach as
-    // G2-Edit's open_controls_menu (src/appMenuBar.c there).
+    // notes §2
     static char *    checked[3]   = {"* Rotary", "* Vertical", "* Horizontal"};
     static char *    unchecked[3] = {"Rotary", "Vertical", "Horizontal"};
     int              i;
@@ -128,12 +123,7 @@ static void open_controls_menu(tCoord anchor) {
 }
 
 
-// NO EXPERIMENTAL MENU ANY MORE (2026-09-09). It held one thing - the OpenGL/Metal choice - and
-// macOS is Metal only now, so the switch went and the greyed "Renderer: <name>" readout beneath it
-// was the only item left. A whole top-level menu for one line of information is not worth the width,
-// and the About box prints the renderer anyway (see synthlib_about_text()).
-//
-// If something genuinely experimental turns up again, G2-Edit still has the pattern to copy.
+// notes §3
 
 // ── Help menu ─────────────────────────────────────────────────────────────────
 // WHICH BUILD IS THIS. Version, compile time and the render backend in force. The backend is a

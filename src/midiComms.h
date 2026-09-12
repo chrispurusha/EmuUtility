@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/midiComms.h.md - "// notes §k" refers there.
 
 #ifndef __MIDI_COMMS_H__
 #define __MIDI_COMMS_H__
@@ -38,10 +39,7 @@ int start_midi_thread(void);
 // commands below instead.
 void midi_send(const uint8_t * data, uint32_t length);
 
-// ── Commands (safe to call from ANY thread) ──────────────────────────────────
-// Each posts to gToMidiThread and wakes the MIDI thread's CFRunLoop, so the work runs on the one
-// thread that owns the connection state. Named to match SynthEdit's midi_request_reconnect(), which
-// solves the same problem there.
+// notes §1
 
 // Rescan CoreMIDI and re-identify. Replaces the old public midi_scan_devices(), which callers on the
 // UI thread (Scan Devices menu, sleep/wake notification) used to invoke directly — racing the MIDI
@@ -65,7 +63,7 @@ void midi_post_session_open(void);
 void midi_post_session_status(uint8_t seq);
 
 // A MIDI Note On/Off for the computer-keyboard note entry (noteEntry.c). Ordinary channel-voice
-// MIDI rather than PEPTALK — see NOTE_ENTRY_MIDI_CHANNEL in defs.h.
+// MIDI rather than PEPTALK — see EMU_MIDI_CHANNEL in defs.h.
 void midi_post_note_event(uint8_t note, uint8_t velocity, bool on);
 
 // Record that the user just did something that may change the display, so the MIDI thread takes one
@@ -108,10 +106,7 @@ bool midi_sds_progress(uint32_t * packetsSent, uint32_t * packetsTotal, bool * c
 // Hand the MIDI thread the outcome of an LCD reply the CoreMIDI callback has already dealt with.
 void midi_post_lcd_reply(const tLcdReplyData * reply);
 
-// Should this reply be refused rather than applied? True only when the timeout has left more than
-// one request outstanding AND this reply's sequence id is not the one we are waiting for — a
-// mismatch alone means nothing, because the device also speaks unprompted. MIDI thread owns the
-// state; the callback thread only reads it.
+// notes §2
 bool midi_lcd_reply_suspect(uint8_t replySeq);
 
 // True when the reply in hand describes a screen the user has already moved past — painting it would
@@ -133,11 +128,7 @@ bool midi_window_focused(void);
 void midi_set_press_settle_ms(double ms);
 double midi_press_settle_ms(void);
 
-// Has the display stopped moving? True when nothing is on the wire, nothing is wanted, and the last
-// reply came back reporting no change — i.e. the device itself has said "nothing has changed since
-// you last asked". This is the only sound moment to compare our frame against a fetched one: before
-// it, a difference may simply be the device still working through its own backlog rather than
-// anything wrong on our side.
+// notes §3
 bool midi_lcd_is_quiet(void);
 
 // Encoder accounting, for measuring the coalescing: how many ticks arrived from the UI, and how many

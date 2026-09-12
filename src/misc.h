@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/misc.h.md - "// notes §k" refers there.
 
 #ifndef __MISC_H__
 #define __MISC_H__
@@ -26,10 +27,7 @@
 extern "C" {
 #endif
 
-// register_sleep_wake_notifications() and setup_main_menu() are implemented in misc.mm — the only
-// two things left in this codebase that genuinely need Objective-C/Cocoa. Everything else
-// declared below is plain C: the Device/Controls menus live in appMenuBar.c, settings persistence
-// (backed by SynthLib's cross-platform prefs.h rather than NSUserDefaults) lives in persistence.c.
+// notes §1
 void register_sleep_wake_notifications(void);
 void setup_main_menu(void);
 
@@ -41,10 +39,7 @@ void load_saved_settings(void);
 // window and dial-mode state.
 void save_note_keyboard_setting(bool enabled);
 
-// This app's own container tmp directory, with a trailing '/'. The App Sandbox
-// (com.apple.security.app-sandbox) makes a hardcoded "/tmp/..." path silently unreachable —
-// fopen() just returns NULL, no error — so the backdoor command channel in graphics.c builds its
-// paths on top of this instead. Same helper, same reason, as SynthEdit's synth_temp_dir().
+// notes §2
 const char * emu_temp_dir(void);
 
 #ifdef __cplusplus

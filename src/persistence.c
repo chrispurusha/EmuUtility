@@ -16,11 +16,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/persistence.c.md - "// notes §k" refers there.
 
-// Window/dial-mode settings persistence — goes through SynthLib's prefs.h (a plain "key=value"
-// text file under a per-OS standard config directory) instead of NSUserDefaults, so none of this
-// needs Objective-C/Cocoa any more. Same shape as G2-Edit's persistence.c, minus zoom/file-browser-
-// directory, which this app doesn't have.
+// notes §1
 
 #include "misc.h"
 #include "defs.h"
@@ -39,11 +37,7 @@
 void load_saved_settings(void) {
     synthlib_load_window_and_dial_mode(TARGET_FRAME_BUFF_WIDTH, TARGET_FRAME_BUFF_HEIGHT);
 
-    // Whether the computer keyboard plays notes. Remembered rather than defaulted, because which
-    // setting is "right" depends on what the user is doing: playing the sampler wants it on, editing
-    // a name on the device itself wants it off, and having to set it again every launch is the kind
-    // of small friction that makes a preference worth storing at all. Defaults ON for a fresh
-    // install, so the keyboard works without anyone having to find the menu first.
+    // notes §2
     note_entry_set_enabled(prefs_get_int(PREFS_KEY_NOTE_KEYBOARD, 1) != 0);
 }
 

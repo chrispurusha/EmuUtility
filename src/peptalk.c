@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/peptalk.c.md - "// notes §k" refers there.
 
 #include "sysIncludes.h"
 #include "defs.h"
@@ -59,12 +60,7 @@ static uint8_t send_peptalk(uint8_t msgType, const uint8_t * data, uint32_t data
     return seqId;
 }
 
-// The sequence id the last LCD request went out with. Written and read on the MIDI thread only —
-// it is handed straight to that thread's outstanding-request state, which owns the question of what
-// is in flight. The device echoes the id back, so a reply carrying any other id belongs to a request
-// we already gave up on, and applying its delta would corrupt the frame exactly as a spliced payload
-// does. Matching on the protocol's own identifier rather than on arrival order means we are provably
-// answering the right question.
+// notes §1
 static uint8_t gLastRequestSeq = 0;
 
 void peptalk_send_raw(uint8_t msgType, const uint8_t * data, uint32_t dataLen) {
@@ -150,10 +146,7 @@ uint32_t peptalk_unpack_7bit(const uint8_t * src, uint32_t srcLen, uint8_t * dst
 // Derived from the JS implementation in ctrl.mjs.
 // The delta stream encodes runs of pixels to skip or flip using RLE.
 
-// Applies into `frame`, which is NOT the live buffer — see the call sites. A delta that turns out to
-// overrun is only recognisable part-way through XOR-ing it, so applying straight to the display would
-// paint a half-wrong picture and correct it a round trip later: visible, brief corruption. Working on
-// a scratch copy means a bad delta is simply never shown.
+// notes §2
 static bool apply_lcd_delta_to(uint8_t * frame, const uint8_t * unpacked, uint32_t unpackedLen) {
     bool     flipping = false;
     bool     overran  = false;
@@ -168,11 +161,7 @@ static bool apply_lcd_delta_to(uint8_t * frame, const uint8_t * unpacked, uint32
                 if (bytePos < LCD_BYTES) {
                     frame[bytePos] ^= (uint8_t)(1 << bitPos);
                 } else {
-                    // A delta that runs off the end of the frame was computed against a different
-                    // base than the one we hold — the clamp keeps it from corrupting memory, but the
-                    // picture is now definitely wrong and only a full frame can fix it. Reported
-                    // rather than silently swallowed: this is the one moment we can KNOW we are out
-                    // of step, instead of waiting for the idle resync to find out.
+                    // notes §3
                     overran = true;
                 }
 
@@ -226,14 +215,7 @@ bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen, boo
 
 // ── Incoming message dispatch ─────────────────────────────────────────────────
 
-// A reply has landed. Returns false when it belongs to a request we already gave up on — replies come
-// back in the order the requests went out, so if anything is STILL outstanding after accounting for
-// this one, this is the older reply and applying it would corrupt the frame.
-// Does this reply answer the request that is actually outstanding? Asked of the MIDI thread, which
-// owns that state; this thread only reads it. A reply carrying a different sequence id answers a
-// request already abandoned (the timeout sends a second one without recalling the first), and its
-// delta would XOR against a frame that has since moved on. Nothing here writes request state — the
-// outcome goes back as a message so the owning thread decides what it means.
+// notes §4
 static bool lcd_reply_is_current(uint8_t replySeq) {
     if (midi_lcd_reply_suspect(replySeq)) {
         LOG_ERROR("Discarding stale LCD reply seq=%02X\n", (unsigned)replySeq);
@@ -277,14 +259,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
     switch (msgType) {
         case PEPTALK_SESSION_STATUS:
         {
-            // THE SEQUENCE ID IS IN BYTE 3 HERE, not byte 4 where every other reply carries it —
-            // measured on an E5000, twice, against session opens sent with deliberately different
-            // ids. It is what says which of the session opens we sent this one is answering, and so
-            // which destination the sampler is actually listening on.
-            //
-            // Nothing is decided here any more. Opening the session settles the connection, and the
-            // connection belongs to the MIDI thread — see msgQueue.h. This thread only reports what
-            // arrived.
+            // notes §5
             LOG_DEBUG("PEPTALK session status seq=%02X\n", (unsigned)data[3]);
             midi_post_session_status(data[3]);
             break;
@@ -332,32 +307,12 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
             }
 
             if (unpacked > LCD_BYTES) {
-                // Longer than a whole frame, so it is neither: a full frame unpacks to EXACTLY
-                // LCD_BYTES, and the device never sends a delta bigger than the frame it would
-                // replace. The likeliest cause is a payload that arrived spliced — the SysEx
-                // reassembly buffer in midiComms.c is shared by every connected MIDI source, so
-                // traffic from another device on the rig lands in the middle of a transfer that
-                // takes ~705 ms to arrive. Refetch rather than memcpy it over the pixels: this
-                // branch used to be folded into the full-frame case by a `>=`, which is how
-                // garbage reached the screen.
+                // notes §6
                 LOG_ERROR("LCD payload unpacked to %u, longer than a frame (%u) — refetching\n",
                           (unsigned)unpacked, (unsigned)LCD_BYTES);
                 reply.needsFullFrame = true;
             } else if (unpacked == LCD_BYTES) {
-                // Full frame — replace pixels entirely. Hold gLcdMutex so the
-                // UI thread can't snapshot a half-written buffer (torn frame).
-                // Divergence check, and it costs nothing: we are about to overwrite the frame the
-                // delta stream built, and here is the device's own copy of what that frame SHOULD
-                // be. If they differ, the deltas got out of step — the exact failure that shows as
-                // on-screen corruption sitting there until a full frame washes it away.
-                //
-                // Only meaningful once the display has settled: gLcdBaseTrusted false means deltas
-                // have been applied since the last full frame, and the idle resync only fires after
-                // LCD_RESYNC_IDLE_MS of quiet, by which time the trailing delta has long landed. A
-                // difference at THAT point is a real defect, not a legitimate pending change.
-                // gLcdLastDeltaMs is still zero if no delta has ever been applied, which is the
-                // state at launch — where the buffer is blank and "differs" from the first real
-                // frame for entirely innocent reasons.
+                // notes §7
                 bool     wasDelta = !gLcdBaseTrusted && (gLcdLastDeltaMs > 0.0);
                 uint32_t differed = 0;
 
@@ -387,15 +342,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                 // delta REQUEST with 0x50 rather than 0x53 when it feels like it, so this branch is
                 // the normal path for a button press, not an oddity.
                 pthread_mutex_lock(&gLcdMutex);
-                // A PROBE never commits. Tried committing, 2026-08-20, and the "old, new, old, new"
-                // bounce came straight back with it — on a build where probes were the only deltas
-                // being applied at all, which is what isolates this as the cause.
-                //
-                // Discarding is what makes it safe: a probe that reports change ALWAYS forces a whole
-                // frame, and that frame re-bases us before any further delta is ever applied. So the
-                // device's reference running ahead of ours never gets the chance to matter. Applying
-                // the payload instead paints whatever the delta produces — and when its base is not
-                // the frame we hold, that is a visibly wrong intermediate.
+                // notes §8
                 bool committed = !midi_lcd_probe_in_flight();
                 bool applied   = peptalk_apply_lcd_delta(tmp, unpacked, committed, &reply.changed);
 
@@ -404,11 +351,7 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length) {
                 }
                 pthread_mutex_unlock(&gLcdMutex);
 
-                // An empty delta changed nothing, so the base is as good as it was — that is the
-                // common idle answer and it must not force a re-base.
-                // A probe that saw movement leaves the device's reference ahead of ours precisely
-                // because we threw its payload away — so the base is untrusted either way, and the
-                // whole frame that follows is what puts it right.
+                // notes §9
                 if (applied && reply.changed) {
                     gLcdBaseTrusted = false;   // holds only while every delta since the last full frame landed
                     gLcdLastDeltaMs = get_time_ms();

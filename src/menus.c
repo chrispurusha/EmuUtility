@@ -16,11 +16,6 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/menus.c.md - "// notes §k" refers there.
 
-// The generic nested context menu (open_context_menu(), handle_context_menu_click(),
-// update_context_menu_hover(), render_context_menu(), gContextMenu) now lives
-// in SynthLib (see contextMenu.c/h) — EmuUtility used to carry its own
-// single-level flat-grid duplicate of the same names here, which started
-// colliding with SynthLib's richer nested-flyout types once SynthLib picked
-// up the menu system. This file is the reserved home for EmuUtility-specific
-// menu-building helpers once something actually opens a menu; see menus.h.
+// notes §1

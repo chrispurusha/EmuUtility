@@ -16,6 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+// Notes: Docs/code-notes/peptalk.h.md - "// notes §k" refers there.
 
 #ifndef __PEPTALK_H__
 #define __PEPTALK_H__
@@ -49,25 +50,14 @@ void peptalk_handle_message(const uint8_t * data, uint32_t length);
 // Unpack MIDI 7-bit encoded payload into a byte buffer; returns number of bytes written.
 uint32_t peptalk_unpack_7bit(const uint8_t * src, uint32_t srcLen, uint8_t * dst, uint32_t dstLen);
 
-// Apply a delta (RLE XOR) update to gLcd.pixels.
-// Applies an RLE-XOR delta to gLcd.pixels, ALL OR NOTHING. Returns false if the delta ran off the end
-// of the frame — meaning it was computed against a base we no longer hold — and in that case the
-// display is left exactly as it was, so a bad delta is never briefly painted and then corrected. The
-// caller must then fetch a full frame; nothing short of one can put the picture right. Caller holds
-// gLcdMutex.
-// `commit` false makes this a pure test: it works out whether the delta WOULD change anything and
-// reports that in changedOut, without touching the display. That is how a delta is used as a change
-// detector without ever trusting its content — see LCD_PROBE_WHEN_IDLE.
+// notes §1
 bool peptalk_apply_lcd_delta(const uint8_t * unpacked, uint32_t unpackedLen, bool commit, bool * changedOut);
 
 // The sequence id the last LCD request went out with. MIDI thread only — it hands this to the
 // outstanding-request state so a reply can be matched to the request that asked for it.
 uint8_t peptalk_last_request_seq(void);
 
-// Send an arbitrary PEPTALK message. Exists ONLY for protocol exploration from the backdoor — the
-// message types this app understands are a small subset of what the device implements, and the gaps
-// in the numbering (0x41, 0x42, 0x44 sit between BUTTON 0x40 and ROTARY 0x43) are the obvious place
-// to look for anything else. Nothing in the app proper should call this.
+// notes §2
 void peptalk_send_raw(uint8_t msgType, const uint8_t * data, uint32_t dataLen);
 
 #ifdef __cplusplus
