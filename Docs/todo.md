@@ -4,6 +4,11 @@ Things to do. ONE LINE PER ITEM - keep it that way.
 Measurements, reasoning and completed-work narrative go in findings.md, NOT here.
 Built-but-unchecked work goes in to-test.md.
 
+CT
+
+- The to test items below, need to go into a to-test.md, similar to G2-Edit.
+
+
 Bugs
 
 - Device > MIDI Ports... (SynthLib's midiPortDialog, 2026-09-11) replaced Scan Devices alone - built, NOT yet opened on screen or tried against the sampler; check a chosen input/output connects and a missing one says "Waiting for"
