@@ -26,6 +26,7 @@ extern "C" {
 
 #include "defs.h"
 #include "synthlibDefs.h"
+#include "synthlibVersion.h"
 #include "globalVars.h"
 #include "graphics.h"
 #include "midiComms.h"
@@ -57,6 +58,7 @@ int main(int argc, char ** argv) {
     // notes §1
     prefs_init("EmuUtility");
 
+    SYNTHLIB_APP_INIT();
     init_graphics();
     setup_main_menu();
     start_midi_thread();
